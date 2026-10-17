@@ -2,6 +2,7 @@
    published build: under `dotnet run` the no-op service worker never changes. *@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject ILogger<UpdateBanner> Logger
 
 @if (_updateAvailable)
 {
@@ -37,9 +38,18 @@
             return;
         }
 
-        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/pwa.js");
-        _selfReference = DotNetObjectReference.Create(this);
-        await _module.InvokeVoidAsync("watchForUpdate", _selfReference);
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/pwa.js");
+            _selfReference = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("watchForUpdate", _selfReference);
+        }
+        catch (JSException ex)
+        {
+            // An exception here would reach Blazor's unhandled-error UI and leave the whole app unusable. Not knowing
+            // about updates is a much smaller problem, so log it and carry on.
+            Logger.LogWarning(ex, "Couldn't start watching for app updates.");
+        }
     }
 
     public async ValueTask DisposeAsync()
