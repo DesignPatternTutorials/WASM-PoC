@@ -1,0 +1,16 @@
+{
+  "name": "offline-crud-e2e",
+  "private": true,
+  "description": "End-to-end tests for the Offline CRUD app, run in the installed Microsoft Edge with Playwright.",
+  "type": "module",
+  "scripts": {
+    "test": "npm run publish && playwright test",
+    "test:dev": "playwright test --project=dev-server",
+    "test:published": "npm run publish && playwright test --project=published",
+    "publish": "dotnet publish ../../src/OfflineCrud.Client -c Release -o ../../artifacts/publish --nologo -v q",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
