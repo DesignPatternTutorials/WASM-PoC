@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OfflineCrud.Application.Tests/OfflineCrud.Application.Tests.csproj" />
+    <Project Path="tests/OfflineCrud.Infrastructure.Tests/OfflineCrud.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>
