@@ -170,6 +170,21 @@ public sealed class Product
         IsDeleted = true;
     }
 
+    /// <summary>Reverses <see cref="ApplyLocalDelete"/>, e.g. when the user discards a delete the server rejected.</summary>
+    public void UndoLocalDelete()
+    {
+        IsDeleted = false;
+    }
+
+    /// <summary>
+    /// Forgets which server version this copy is based on, so the next copy fetched from the server replaces it
+    /// (see <see cref="ShouldAcceptServerCopy"/>). Used to throw away a local change in favour of the server's version.
+    /// </summary>
+    public void ForgetServerVersion()
+    {
+        ServerVersion = null;
+    }
+
     /// <summary>Records the id the server assigned when it accepted this product's creation.</summary>
     public void RecordServerId(int serverId)
     {

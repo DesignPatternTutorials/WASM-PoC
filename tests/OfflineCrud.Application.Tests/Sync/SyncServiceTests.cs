@@ -28,7 +28,7 @@ public class SyncServiceTests
         _api = new Mock<IProductApiClient>(MockBehavior.Strict);
         _time = new ManualTimeProvider(Now);
         _lock = new LocalStoreLock();
-        _sync = new SyncService(_store, _store, _api.Object, _lock, _time, new FixedRandom(0.5));
+        _sync = new SyncService(_store, _store, _api.Object, _lock, _store, _time, new FixedRandom(0.5));
     }
 
     [TearDown]
@@ -341,6 +341,146 @@ public class SyncServiceTests
         await _sync.RecoverAsync(CancellationToken.None);
 
         Assert.That(_store.Entry(create.Id)!.Status, Is.EqualTo(OutboxStatus.Pending));
+    }
+
+    [Test]
+    public async Task RetryAsync_MakesAFailedEntryPendingAgain()
+    {
+        Product product = SeedSynced(serverId: 4);
+        product.SetSyncState(SyncState.Failed);
+        _store.Seed(product);
+        OutboxEntry failed = SeedEntry(OutboxOperation.Update, product, V1, Now.AddSeconds(-1)) with
+        {
+            Status = OutboxStatus.Failed,
+            Attempts = 2,
+            LastError = "rejected",
+        };
+        _store.SeedEntry(failed);
+
+        await _sync.RetryAsync(failed.Id, CancellationToken.None);
+
+        OutboxEntry retried = _store.Entry(failed.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(retried.Status, Is.EqualTo(OutboxStatus.Pending));
+            Assert.That(retried.Attempts, Is.Zero);
+            Assert.That(retried.LastError, Is.Null);
+            Assert.That(_store.Product(product.Id)!.SyncState, Is.EqualTo(SyncState.PendingUpdate));
+        });
+    }
+
+    [Test]
+    public void RetryAsync_EntryThatHasNotFailed_Throws()
+    {
+        (_, OutboxEntry create) = SeedLocalCreate(V1);
+
+        Assert.That(() => _sync.RetryAsync(create.Id, CancellationToken.None), Throws.InvalidOperationException);
+    }
+
+    [Test]
+    public async Task DiscardAsync_FailedCreate_RemovesTheProductAndEverythingQueuedAfterIt()
+    {
+        (Product product, OutboxEntry create) = SeedLocalCreate(V1);
+        _store.SeedEntry(create with { Status = OutboxStatus.Failed });
+        SeedEntry(OutboxOperation.Delete, product, null, Now.AddSeconds(1));
+
+        Guid entityId = await _sync.DiscardAsync(create.Id, CancellationToken.None);
+
+        Product after = _store.Product(product.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(entityId, Is.EqualTo(product.Id));
+            Assert.That(_store.Entries, Is.Empty);
+            Assert.That(after.IsDeleted, Is.True);
+            Assert.That(after.SyncState, Is.EqualTo(SyncState.Synced));
+        });
+    }
+
+    [Test]
+    public async Task DiscardAsync_FailedUpdate_LetsTheServerCopyWinNextTime()
+    {
+        Product product = SeedSynced(serverId: 4);
+        OutboxEntry failed = SeedEntry(OutboxOperation.Update, product, V2, Now.AddSeconds(-1)) with { Status = OutboxStatus.Failed };
+        _store.SeedEntry(failed);
+
+        await _sync.DiscardAsync(failed.Id, CancellationToken.None);
+
+        Product after = _store.Product(product.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(_store.Entries, Is.Empty);
+            Assert.That(after.SyncState, Is.EqualTo(SyncState.Synced));
+            Assert.That(after.ServerVersion, Is.Null);
+            Assert.That(after.ShouldAcceptServerCopy("v1"), Is.True, "even the version it was based on now replaces it");
+        });
+    }
+
+    [Test]
+    public async Task DiscardAsync_FailedDelete_BringsTheProductBack()
+    {
+        Product product = SeedSynced(serverId: 4);
+        product.ApplyLocalDelete();
+        _store.Seed(product);
+        OutboxEntry failed = SeedEntry(OutboxOperation.Delete, product, null, Now.AddSeconds(-1)) with { Status = OutboxStatus.Failed };
+        _store.SeedEntry(failed);
+
+        await _sync.DiscardAsync(failed.Id, CancellationToken.None);
+
+        Product after = _store.Product(product.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(after.IsDeleted, Is.False);
+            Assert.That(after.SyncState, Is.EqualTo(SyncState.Synced));
+            Assert.That(after.ServerVersion, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task ClearLocalDataAsync_EmptiesTheStore()
+    {
+        SeedLocalCreate(V1);
+
+        await _sync.ClearLocalDataAsync(CancellationToken.None);
+
+        Assert.That(_store.Entries, Is.Empty);
+    }
+
+    [Test]
+    public async Task ClearLocalDataAsync_WaitsForARunInProgress()
+    {
+        (Product product, OutboxEntry create) = SeedLocalCreate(V1);
+        TaskCompletionSource<ServerProduct> response = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _api.Setup(api => api.CreateAsync(V1, create.Id, It.IsAny<CancellationToken>())).Returns(response.Task);
+
+        Task<SyncRunResult> run = _sync.RunAsync(CancellationToken.None);
+        Task clear = _sync.ClearLocalDataAsync(CancellationToken.None);
+        bool clearedEarly = clear.IsCompleted;
+        response.SetResult(new ServerProduct(195, V1, null, null, null));
+        await run;
+        await clear;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(clearedEarly, Is.False, "clearing waited for the run");
+            Assert.That(_store.Product(product.Id), Is.Null, "and the run's write-back didn't survive the clear");
+        });
+    }
+
+    [Test]
+    public async Task GetOutboxItemsAsync_UsesTheTitleOnThisDevice_EvenForATombstone()
+    {
+        Product product = SeedSynced(serverId: 4);
+        product.ApplyLocalDelete();
+        _store.Seed(product);
+        SeedEntry(OutboxOperation.Delete, product, null, Now);
+
+        OutboxItem item = (await _sync.GetOutboxItemsAsync(CancellationToken.None)).Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(item.ProductTitle, Is.EqualTo("Version 1"));
+            Assert.That(item.ServerId, Is.EqualTo(4));
+        });
     }
 
     private (Product Product, OutboxEntry Create) SeedLocalCreate(ProductDetails details, DateTimeOffset? createdAt = null)

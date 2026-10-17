@@ -30,6 +30,7 @@ public sealed class SyncService : ISyncService, IDisposable
     private readonly IProductRepository _products;
     private readonly IProductApiClient _apiClient;
     private readonly LocalStoreLock _storeLock;
+    private readonly ILocalDatabase _database;
     private readonly TimeProvider _timeProvider;
     private readonly Random _random;
 
@@ -43,6 +44,7 @@ public sealed class SyncService : ISyncService, IDisposable
         IProductRepository products,
         IProductApiClient apiClient,
         LocalStoreLock storeLock,
+        ILocalDatabase database,
         TimeProvider timeProvider,
         Random random)
     {
@@ -50,6 +52,7 @@ public sealed class SyncService : ISyncService, IDisposable
         _products = products;
         _apiClient = apiClient;
         _storeLock = storeLock;
+        _database = database;
         _timeProvider = timeProvider;
         _random = random;
     }
@@ -102,6 +105,89 @@ public sealed class SyncService : ISyncService, IDisposable
     public Task<IReadOnlyList<OutboxEntry>> GetOutboxAsync(CancellationToken cancellationToken)
     {
         return _outbox.GetAllAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<OutboxItem>> GetOutboxItemsAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<OutboxEntry> entries = await _outbox.GetAllAsync(cancellationToken);
+        List<OutboxItem> items = new(entries.Count);
+        foreach (OutboxEntry entry in entries)
+        {
+            // The repository returns tombstones too, so a queued delete still has a title to show.
+            Product? product = await _products.GetAsync(entry.EntityId, cancellationToken);
+            string title = product?.Details.Title ?? entry.Payload?.Title ?? "(unknown product)";
+            items.Add(new OutboxItem(entry, title, product?.ServerId));
+        }
+
+        return items;
+    }
+
+    /// <inheritdoc />
+    public async Task RetryAsync(Guid entryId, CancellationToken cancellationToken)
+    {
+        using IDisposable _ = await _storeLock.AcquireAsync(cancellationToken);
+
+        OutboxEntry entry = await GetFailedEntryAsync(entryId, cancellationToken);
+        OutboxEntry retried = entry.ResetToPending();
+        IReadOnlyList<OutboxEntry> queue = await _outbox.GetForEntityAsync(entry.EntityId, cancellationToken);
+
+        Product? product = await _products.GetAsync(entry.EntityId, cancellationToken);
+        product?.SetSyncState(OutboxPlanner.DeriveSyncState([.. queue.Select(other => other.Id == entryId ? retried : other)]));
+        await _outbox.CommitAsync(product is null ? [] : [product], [retried], [], cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<Guid> DiscardAsync(Guid entryId, CancellationToken cancellationToken)
+    {
+        using IDisposable _ = await _storeLock.AcquireAsync(cancellationToken);
+
+        OutboxEntry entry = await GetFailedEntryAsync(entryId, cancellationToken);
+        IReadOnlyList<OutboxEntry> queue = await _outbox.GetForEntityAsync(entry.EntityId, cancellationToken);
+        Product? product = await _products.GetAsync(entry.EntityId, cancellationToken);
+
+        // Discarding a create discards everything queued after it too: none of it can reach a server that never got
+        // the product. Otherwise only this one entry goes.
+        IReadOnlyList<OutboxEntry> toDiscard = entry.Operation == OutboxOperation.Create ? queue : [entry];
+        IReadOnlyList<OutboxEntry> remaining = [.. queue.Where(other => !toDiscard.Contains(other))];
+
+        switch (entry.Operation)
+        {
+            case OutboxOperation.Create:
+                // The server never had it, so "discard the change" means the product goes.
+                product?.ApplyLocalDelete();
+                break;
+            case OutboxOperation.Update:
+                // Throw away the local edit: the next copy fetched from the server will replace it.
+                product?.ForgetServerVersion();
+                break;
+            case OutboxOperation.Delete:
+                // Throw away the delete: bring the product back, and let the server's copy replace the local one.
+                product?.UndoLocalDelete();
+                product?.ForgetServerVersion();
+                break;
+        }
+
+        product?.SetSyncState(OutboxPlanner.DeriveSyncState(remaining));
+        await _outbox.CommitAsync(product is null ? [] : [product], [], [.. toDiscard.Select(other => other.Id)], cancellationToken);
+        return entry.EntityId;
+    }
+
+    /// <inheritdoc />
+    public async Task ClearLocalDataAsync(CancellationToken cancellationToken)
+    {
+        // Wait for any run to finish (not WaitAsync(0) as in RunAsync): clearing mid-run would let the run write back
+        // records it read before the clear.
+        await _runGate.WaitAsync(cancellationToken);
+        try
+        {
+            using IDisposable _ = await _storeLock.AcquireAsync(cancellationToken);
+            await _database.ClearAsync(cancellationToken);
+        }
+        finally
+        {
+            _runGate.Release();
+        }
     }
 
     /// <summary>Releases the run gate.</summary>
@@ -295,6 +381,17 @@ public sealed class SyncService : ISyncService, IDisposable
     {
         using IDisposable _ = await _storeLock.AcquireAsync(cancellationToken);
         await _outbox.CommitAsync([], [entry], [], cancellationToken);
+    }
+
+    private async Task<OutboxEntry> GetFailedEntryAsync(Guid entryId, CancellationToken cancellationToken)
+    {
+        OutboxEntry? entry = (await _outbox.GetAllAsync(cancellationToken)).FirstOrDefault(other => other.Id == entryId);
+        return entry switch
+        {
+            null => throw new InvalidOperationException($"Outbox entry {entryId} doesn't exist."),
+            { Status: not OutboxStatus.Failed } => throw new InvalidOperationException($"Outbox entry {entryId} hasn't failed, so it can't be retried or discarded."),
+            _ => entry,
+        };
     }
 
     /// <summary>Turns a permanent failure into a reason the user can act on.</summary>

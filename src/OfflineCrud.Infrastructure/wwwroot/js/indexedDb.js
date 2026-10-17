@@ -242,6 +242,20 @@ export async function commit(products, outboxPuts, outboxDeletes) {
     });
 }
 
+/**
+ * Empties every store (products, outbox, metadata) in one transaction. The database and its schema stay, so the app
+ * carries on working and re-downloads the catalogue on the next refresh.
+ */
+export async function clearAll() {
+    const db = await openDatabase();
+    const transaction = db.transaction([PRODUCTS, OUTBOX, META], 'readwrite');
+    await writeAll(transaction, () => {
+        transaction.objectStore(PRODUCTS).clear();
+        transaction.objectStore(OUTBOX).clear();
+        transaction.objectStore(META).clear();
+    });
+}
+
 /** Returns a metadata value, or null if it isn't set. */
 export async function getMeta(key) {
     const db = await openDatabase();

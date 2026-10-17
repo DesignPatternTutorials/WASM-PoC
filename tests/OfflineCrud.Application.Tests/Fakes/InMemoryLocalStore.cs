@@ -12,7 +12,7 @@ namespace OfflineCrud.Application.Tests.Fakes;
 /// Products are stored as copies, like IndexedDB's structured clones. Code that mutates a product but never commits it
 /// therefore doesn't appear to have saved it, which is the bug these tests need to catch.
 /// </remarks>
-internal sealed class InMemoryLocalStore : IProductRepository, IOutboxStore
+internal sealed class InMemoryLocalStore : IProductRepository, IOutboxStore, ILocalDatabase
 {
     private readonly Dictionary<Guid, Product> _products = [];
     private readonly Dictionary<Guid, OutboxEntry> _outbox = [];
@@ -95,6 +95,15 @@ internal sealed class InMemoryLocalStore : IProductRepository, IOutboxStore
             _outbox.Remove(id);
         }
 
+        return Task.CompletedTask;
+    }
+
+    // ILocalDatabase
+
+    public Task ClearAsync(CancellationToken cancellationToken)
+    {
+        _products.Clear();
+        _outbox.Clear();
         return Task.CompletedTask;
     }
 
