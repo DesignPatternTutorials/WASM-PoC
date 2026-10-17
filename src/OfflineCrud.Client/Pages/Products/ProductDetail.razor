@@ -1,4 +1,4 @@
-@page "/products/{Id:int}"
+@page "/products/{Id:guid}"
 @inherits CancellableComponentBase
 @inject IProductService ProductService
 
@@ -7,11 +7,9 @@
 <nav aria-label="Breadcrumb">
     <ol class="breadcrumb">
         <li class="breadcrumb-item"><a href="products">Products</a></li>
-        <li class="breadcrumb-item active" aria-current="page">@(_product?.Details.Title ?? $"#{Id}")</li>
+        <li class="breadcrumb-item active" aria-current="page">@(_product?.Details.Title ?? "Product")</li>
     </ol>
 </nav>
-
-<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
 
 @if (_loading)
 {
@@ -24,7 +22,8 @@ else if (_deleted)
             <i class="bi bi-trash3 display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
             <h1 class="h4">Product deleted</h1>
             <p class="text-body-secondary mb-4">
-                DummyJSON accepted the delete but doesn't persist it, so this product will still appear in the list.
+                DummyJSON accepted the delete but doesn't persist it. This device keeps a record of the delete, so the product
+                won't come back when the catalogue is refreshed.
             </p>
             <a href="products" class="btn btn-primary">Back to products</a>
         </div>
@@ -33,6 +32,31 @@ else if (_deleted)
 else if (_product is not null)
 {
     ProductDetails details = _product.Details;
+
+    <div class="small mb-3 text-body-secondary" role="status" aria-live="polite">
+        @switch (_refresh?.Status)
+        {
+            case null:
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                <span>Saved on this device. Checking DummyJSON for updates…</span>
+                break;
+            case RefreshStatus.NotOnServer:
+                <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
+                <span>
+                    Only on this device. DummyJSON doesn't store products created through it, so it has no copy
+                    @(_product.ServerId is int serverId ? $"of #{serverId}" : "of this product") to refresh from.
+                </span>
+                break;
+            case RefreshStatus.Failed:
+                <i class="bi bi-wifi-off me-1" aria-hidden="true"></i>
+                <span>Showing the copy saved on this device. DummyJSON couldn't be reached: @_refresh.Error?.Message</span>
+                break;
+            default:
+                <i class="bi bi-database-check me-1" aria-hidden="true"></i>
+                <span>Saved on this device and checked against DummyJSON just now.</span>
+                break;
+        }
+    </div>
 
     <div class="card">
         <div class="card-body p-4">
@@ -87,17 +111,26 @@ else if (_product is not null)
                             <i class="bi bi-trash me-1" aria-hidden="true"></i>Delete
                         </button>
                     </div>
+
+                    <dl class="row small text-body-secondary mt-4 mb-0">
+                        <dt class="col-sm-4 fw-normal">Local id</dt>
+                        <dd class="col-sm-8 font-monospace">@_product.Id</dd>
+                        <dt class="col-sm-4 fw-normal">Server id</dt>
+                        <dd class="col-sm-8">@(_product.ServerId?.ToString(CultureInfo.InvariantCulture) ?? "none")</dd>
+                        <dt class="col-sm-4 fw-normal">Server version</dt>
+                        <dd class="col-sm-8 font-monospace">@(_product.ServerVersion ?? "unknown")</dd>
+                    </dl>
                 </div>
             </div>
         </div>
     </div>
 }
-else if (_loadError is null)
+else
 {
     <div class="text-center py-5">
         <i class="bi bi-question-circle display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
         <h1 class="h4">Product not found</h1>
-        <p class="text-body-secondary">DummyJSON has no product #@Id. Products you create aren't stored, so they can't be opened later.</p>
+        <p class="text-body-secondary">There's no product with this id saved on this device.</p>
         <a href="products" class="btn btn-outline-primary">Back to products</a>
     </div>
 }
@@ -110,7 +143,7 @@ else if (_loadError is null)
 
 @code {
     private Product? _product;
-    private ApiException? _loadError;
+    private RefreshResult? _refresh;
     private bool _loading = true;
     private bool _deleted;
 
@@ -118,24 +151,30 @@ else if (_loadError is null)
     private bool _deleting;
     private ApiException? _deleteError;
 
-    /// <summary>The product's id from the route.</summary>
+    /// <summary>The product's local id from the route.</summary>
     [Parameter]
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
-    protected override Task OnParametersSetAsync() => LoadAsync();
-
-    private async Task LoadAsync()
+    protected override async Task OnParametersSetAsync()
     {
         _loading = true;
-        _loadError = null;
+        _refresh = null;
         try
         {
+            // Stale-while-revalidate, as on the list page: show the saved copy, then check the server.
             _product = await ProductService.GetAsync(Id, ComponentToken);
-        }
-        catch (ApiException ex)
-        {
-            _loadError = ex;
-            _product = null;
+            _loading = false;
+            if (_product is null)
+            {
+                return;
+            }
+
+            StateHasChanged();
+            _refresh = await ProductService.RefreshAsync(Id, ComponentToken);
+            if (_refresh is { Status: RefreshStatus.Refreshed, ChangedCount: > 0 })
+            {
+                _product = await ProductService.GetAsync(Id, ComponentToken);
+            }
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {

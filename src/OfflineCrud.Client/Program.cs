@@ -16,6 +16,7 @@ string apiBaseAddress = builder.Configuration["DummyJson:BaseAddress"]
     ?? throw new InvalidOperationException("Configuration value 'DummyJson:BaseAddress' is missing from wwwroot/appsettings.json.");
 
 builder.Services.AddInfrastructure(new Uri(apiBaseAddress));
+builder.Services.AddSingleton(TimeProvider.System);
 
 // LEARN: Scoped and singleton mean the same thing here. A WebAssembly app has one DI scope that lasts
 // until the tab is closed or reloaded.

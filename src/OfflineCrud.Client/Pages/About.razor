@@ -32,13 +32,13 @@
                     <div class="col-sm-6">
                         <div class="layer layer-infrastructure h-100">
                             <span class="layer-label">Infrastructure</span>
-                            <p class="small mb-0">HttpClient for DummyJSON. Later: IndexedDB and connectivity via JS interop.</p>
+                            <p class="small mb-0">HttpClient for DummyJSON, and IndexedDB through a hand-written JS module. Later: connectivity via JS events.</p>
                         </div>
                     </div>
                     <div class="col-12">
                         <div class="layer layer-application">
                             <span class="layer-label">Application</span>
-                            <p class="small mb-3">Use cases (<code>IProductService</code>) and the ports the outer layers implement (<code>IProductApiClient</code>).</p>
+                            <p class="small mb-3">Use cases (<code>IProductService</code>) and the ports the outer layers implement (<code>IProductApiClient</code>, <code>IProductRepository</code>).</p>
                             <div class="layer layer-domain">
                                 <span class="layer-label">Domain</span>
                                 <p class="small mb-0">Products and their rules. No dependencies at all.</p>
@@ -53,7 +53,7 @@
                 <div class="card-body">
                     <h3 class="h6">Why it's arranged like this</h3>
                     <ul class="small mb-0">
-                        <li class="mb-2">Pages call <code>IProductService</code>, never HttpClient. When later phases make the service read from IndexedDB first, no page has to change.</li>
+                        <li class="mb-2">Pages call <code>IProductService</code>, never HttpClient or IndexedDB. Switching the service to read from IndexedDB first in Phase 2 didn't change what the pages call.</li>
                         <li class="mb-2">The sync engine's rules (ordering, retries, coalescing) are plain C#, so they can be unit tested without a browser.</li>
                         <li class="mb-2">The Client references Infrastructure only so <code>Program.cs</code> can register it. There's no server, so the browser is the composition root.</li>
                         <li>Tests check that Domain and Application never reference the outer layers.</li>
@@ -69,7 +69,7 @@
     <p>
         A browser app has no guaranteed connection. The fix is to make the device's own storage the source of truth for
         the UI, and treat the API as somewhere changes are <em>synced to</em>, not where they're saved.
-        <span class="badge bg-primary-subtle text-primary-emphasis">Phases 2–4</span>
+        <span class="badge bg-primary-subtle text-primary-emphasis">Reads: Phase 2 · Writes: Phases 3–4</span>
     </p>
     <ol class="row g-3 list-unstyled">
         <li class="col-md-6 col-xl-3">
@@ -151,7 +151,7 @@
     [
         new(0, "Scaffold", "Solution, layered projects, build settings, verified API notes.", Done: true),
         new(1, "Online-only CRUD", "Every page works straight against DummyJSON. The \"before\" picture.", Done: true),
-        new(2, "IndexedDB local store", "A hand-written JS module, a local repository, stale-while-revalidate reads.", Done: false),
+        new(2, "IndexedDB local store", "A hand-written JS module, a local repository, stale-while-revalidate reads.", Done: true),
         new(3, "Outbox + sync engine", "Transactional local writes, ordered sync, retries with backoff, coalescing.", Done: false),
         new(4, "Connectivity + UX", "Online/offline detection, a simulate-offline switch, pending badges, the sync page.", Done: false),
         new(5, "PWA app shell", "Service worker caching and an offline start-up test on a published build.", Done: false),

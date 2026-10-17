@@ -15,7 +15,11 @@ internal sealed record DummyJsonProduct(
     decimal? DiscountPercentage,
     double? Rating,
     int? Stock,
-    string? Thumbnail);
+    string? Thumbnail,
+    DummyJsonMeta? Meta);
+
+// Only UpdatedAt is used: it's the closest thing DummyJSON has to a version. It's absent from write responses.
+internal sealed record DummyJsonMeta(string? UpdatedAt);
 
 internal sealed record DummyJsonProductPage(IReadOnlyList<DummyJsonProduct> Products, int Total, int Skip, int Limit);
 

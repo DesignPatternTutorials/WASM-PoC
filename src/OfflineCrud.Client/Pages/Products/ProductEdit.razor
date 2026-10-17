@@ -1,4 +1,4 @@
-@page "/products/{Id:int}/edit"
+@page "/products/{Id:guid}/edit"
 @inherits CancellableComponentBase
 @inject IProductService ProductService
 
@@ -7,7 +7,7 @@
 <nav aria-label="Breadcrumb">
     <ol class="breadcrumb">
         <li class="breadcrumb-item"><a href="products">Products</a></li>
-        <li class="breadcrumb-item"><a href="products/@Id">@(_title ?? $"#{Id}")</a></li>
+        <li class="breadcrumb-item"><a href="products/@Id">@(_title ?? "Product")</a></li>
         <li class="breadcrumb-item active" aria-current="page">Edit</li>
     </ol>
 </nav>
@@ -28,12 +28,20 @@ else if (_model is not null)
     {
         <div class="alert alert-success" role="status">
             <div class="fw-semibold"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Saved</div>
-            DummyJSON answered <code>200 OK</code> and echoed back “@_saved.Details.Title” at @Formatting.Price(_saved.Details.Price).
-            It doesn't persist changes, so <a href="products/@Id" class="alert-link">the detail page</a> will still show the original values.
+            DummyJSON answered <code>200 OK</code>, and the change is saved on this device. DummyJSON itself forgets it, but a
+            refresh only replaces a product when the server's version changes, so <a href="products/@Id" class="alert-link">the
+            detail page</a> keeps showing your edit.
         </div>
     }
 
     <ApiErrorAlert Error="_saveError" />
+    @if (_saveError?.Kind == ApiFailureKind.NotFound)
+    {
+        <p class="small text-body-secondary">
+            DummyJSON never stored this product (it was created through its simulated API), so it can't update it either.
+            Phase 3 handles this case by marking the change as failed, with this reason, instead of losing it.
+        </p>
+    }
 
     <div class="card">
         <div class="card-body p-4">
@@ -47,7 +55,7 @@ else if (_loadError is null)
     <div class="text-center py-5">
         <i class="bi bi-question-circle display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
         <h2 class="h4">Product not found</h2>
-        <p class="text-body-secondary">DummyJSON has no product #@Id.</p>
+        <p class="text-body-secondary">There's no product with this id saved on this device.</p>
         <a href="products" class="btn btn-outline-primary">Back to products</a>
     </div>
 }
@@ -62,9 +70,9 @@ else if (_loadError is null)
     private bool _saving;
     private Product? _saved;
 
-    /// <summary>The product's id from the route.</summary>
+    /// <summary>The product's local id from the route.</summary>
     [Parameter]
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
     protected override Task OnParametersSetAsync() => LoadAsync();
 

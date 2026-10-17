@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using OfflineCrud.Application.Products;
 using OfflineCrud.Infrastructure.DummyJson;
+using OfflineCrud.Infrastructure.IndexedDb;
 
 namespace OfflineCrud.Infrastructure;
 
@@ -26,6 +27,9 @@ public static class ServiceCollectionExtensions
             client.BaseAddress = productApiBaseAddress;
             client.Timeout = TimeSpan.FromSeconds(15);
         });
+
+        // One instance for the app's lifetime, so the JS module is imported once.
+        services.AddScoped<IProductRepository, IndexedDbProductRepository>();
 
         return services;
     }

@@ -24,107 +24,141 @@
 }
 
 @* Blazor calls preventDefault on a form's submit event when @onsubmit is handled, so the page doesn't reload. *@
-<form class="mb-4" role="search" @onsubmit="Search">
+<form class="mb-3" role="search" @onsubmit="Search">
     <div class="input-group">
         <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
         <input type="search" class="form-control" placeholder="Search by title, brand or category"
                aria-label="Search products" @bind="_searchText" />
         <button class="btn btn-primary" type="submit">Search</button>
-        @if (!string.IsNullOrWhiteSpace(Query))
+        @if (IsSearching)
         {
             <button class="btn btn-outline-secondary" type="button" @onclick="ClearSearch">Clear</button>
         }
     </div>
 </form>
 
-<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
-
-@if (_loading && _page is null)
+@if (IsSearching)
 {
-    <LoadingIndicator Text="Loading products…" />
-}
-else if (_page is not null)
-{
-    @if (_page.Items.Count == 0)
+    @if (_searchResult is { } search)
     {
-        <div class="text-center py-5 text-body-secondary">
-            <i class="bi bi-inbox display-5 d-block mb-3" aria-hidden="true"></i>
-            @if (!string.IsNullOrWhiteSpace(Query))
+        <div class="small mb-3" role="status">
+            @if (search.Source == ProductDataSource.Server)
             {
-                <p>No products match “@Query”.</p>
-                <button type="button" class="btn btn-outline-primary" @onclick="ClearSearch">Show all products</button>
+                <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis">
+                    <i class="bi bi-cloud-check me-1" aria-hidden="true"></i>Results from DummyJSON
+                </span>
             }
             else
             {
-                <p>There are no products on this page.</p>
-                <button type="button" class="btn btn-outline-primary" @onclick="() => GoToPage(1)">Go to the first page</button>
+                <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis">
+                    <i class="bi bi-device-ssd me-1" aria-hidden="true"></i>Results from this device
+                </span>
+                <span class="text-body-secondary ms-1">
+                    @(search.ServerError?.Kind == ApiFailureKind.Network
+                        ? "DummyJSON couldn't be reached, so the products saved here were searched instead."
+                        : $"DummyJSON's search failed ({search.ServerError?.Message}), so the products saved here were searched instead.")
+                </span>
             }
         </div>
     }
-    else
-    {
-        <div class="card">
-            <div class="table-responsive">
-                <table class="table table-hover table-products mb-0 @(_loading ? "opacity-50" : null)" aria-busy="@_loading">
-                    <thead>
-                        <tr>
-                            <th scope="col" class="ps-3">Product</th>
-                            <th scope="col" class="d-none d-md-table-cell">Category</th>
-                            <th scope="col" class="text-end">Price</th>
-                            <th scope="col" class="text-end d-none d-sm-table-cell">Stock</th>
-                            <th scope="col" class="text-end pe-3"><span class="visually-hidden">Actions</span></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (Product product in _page.Items)
-                        {
-                            <tr @key="product.Id">
-                                <td class="ps-3">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <ProductThumbnail Url="product.ThumbnailUrl" />
-                                        <div>
-                                            <a href="products/@product.Id" class="fw-semibold text-decoration-none">@product.Details.Title</a>
-                                            @if (product.Details.Brand is not null)
-                                            {
-                                                <div class="small text-body-secondary">@product.Details.Brand</div>
-                                            }
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="d-none d-md-table-cell">
-                                    <span class="badge rounded-pill bg-body-tertiary text-body border">@Formatting.Category(product.Details.Category)</span>
-                                </td>
-                                <td class="text-end text-nowrap">@Formatting.Price(product.Details.Price)</td>
-                                <td class="text-end d-none d-sm-table-cell">
-                                    @if (product.IsInStock)
-                                    {
-                                        @product.Details.Stock
-                                    }
-                                    else
-                                    {
-                                        <span class="badge text-bg-danger">Out of stock</span>
-                                    }
-                                </td>
-                                <td class="text-end pe-3 text-nowrap">
-                                    <a href="products/@product.Id/edit" class="btn btn-sm btn-outline-secondary" title="Edit">
-                                        <i class="bi bi-pencil" aria-hidden="true"></i><span class="visually-hidden">Edit @product.Details.Title</span>
-                                    </a>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" @onclick="() => AskToDelete(product)">
-                                        <i class="bi bi-trash" aria-hidden="true"></i><span class="visually-hidden">Delete @product.Details.Title</span>
-                                    </button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
+}
+else
+{
+    <FreshnessBar IsRefreshing="_refreshing" Result="_refreshResult" LastRefreshed="_lastRefreshed"
+                  OnRefresh="() => RefreshAsync(force: true)" />
+}
 
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
-            <span class="small text-body-secondary">Page @_page.PageNumber of @_page.PageCount</span>
-            <Pager PageNumber="_page.PageNumber" PageCount="_page.PageCount" OnPageSelected="GoToPage" />
+@if (_page is null)
+{
+    <LoadingIndicator Text="@(IsSearching ? "Searching…" : "Loading products…")" />
+}
+else if (_page.Items.Count == 0)
+{
+    <div class="text-center py-5 text-body-secondary">
+        <i class="bi bi-inbox display-5 d-block mb-3" aria-hidden="true"></i>
+        @if (IsSearching)
+        {
+            <p>No products match “@Query”.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="ClearSearch">Show all products</button>
+        }
+        else if (_page.TotalCount > 0)
+        {
+            <p>There are no products on this page.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="() => GoToPage(1)">Go to the first page</button>
+        }
+        else if (_refreshing)
+        {
+            <p>Downloading the catalogue to this device…</p>
+        }
+        else
+        {
+            <p>Nothing is saved on this device yet. Connect to the internet once to download the catalogue.</p>
+        }
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover table-products mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col" class="ps-3">Product</th>
+                        <th scope="col" class="d-none d-md-table-cell">Category</th>
+                        <th scope="col" class="text-end">Price</th>
+                        <th scope="col" class="text-end d-none d-sm-table-cell">Stock</th>
+                        <th scope="col" class="text-end pe-3"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (Product product in _page.Items)
+                    {
+                        <tr @key="product.Id">
+                            <td class="ps-3">
+                                <div class="d-flex align-items-center gap-3">
+                                    <ProductThumbnail Url="product.ThumbnailUrl" />
+                                    <div>
+                                        <a href="products/@product.Id" class="fw-semibold text-decoration-none">@product.Details.Title</a>
+                                        @if (product.Details.Brand is not null)
+                                        {
+                                            <div class="small text-body-secondary">@product.Details.Brand</div>
+                                        }
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <span class="badge rounded-pill bg-body-tertiary text-body border">@Formatting.Category(product.Details.Category)</span>
+                            </td>
+                            <td class="text-end text-nowrap">@Formatting.Price(product.Details.Price)</td>
+                            <td class="text-end d-none d-sm-table-cell">
+                                @if (product.IsInStock)
+                                {
+                                    @product.Details.Stock
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-danger">Out of stock</span>
+                                }
+                            </td>
+                            <td class="text-end pe-3 text-nowrap">
+                                <a href="products/@product.Id/edit" class="btn btn-sm btn-outline-secondary" title="Edit">
+                                    <i class="bi bi-pencil" aria-hidden="true"></i><span class="visually-hidden">Edit @product.Details.Title</span>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" @onclick="() => AskToDelete(product)">
+                                    <i class="bi bi-trash" aria-hidden="true"></i><span class="visually-hidden">Delete @product.Details.Title</span>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
-    }
+    </div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+        <span class="small text-body-secondary">Page @_page.PageNumber of @_page.PageCount</span>
+        <Pager PageNumber="_page.PageNumber" PageCount="_page.PageCount" OnPageSelected="GoToPage" />
+    </div>
 }
 
 <ConfirmDialog IsOpen="_pendingDelete is not null" Title="Delete product?" ConfirmText="Delete"
@@ -137,11 +171,14 @@ else if (_page is not null)
     private const int PageSize = 10;
 
     private PagedResult<Product>? _page;
-    private ApiException? _loadError;
-    private bool _loading;
+    private ProductSearchResult? _searchResult;
     private int _loadVersion;
     private string? _searchText;
     private string? _notice;
+
+    private bool _refreshing;
+    private RefreshResult? _refreshResult;
+    private DateTimeOffset? _lastRefreshed;
 
     private Product? _pendingDelete;
     private bool _deleting;
@@ -155,10 +192,14 @@ else if (_page is not null)
     [SupplyParameterFromQuery(Name = "q")]
     public string? Query { get; set; }
 
+    private bool IsSearching => !string.IsNullOrWhiteSpace(Query);
+
+    private int Skip => (Math.Max(1, PageNumber ?? 1) - 1) * PageSize;
+
     private string Summary => _page switch
     {
         null => "Browse, search and edit the DummyJSON catalogue.",
-        _ when !string.IsNullOrWhiteSpace(Query) => $"{_page.TotalCount} results for “{Query}”",
+        _ when IsSearching => $"{_page.TotalCount} results for “{Query}”",
         _ => $"{_page.TotalCount} products",
     };
 
@@ -166,43 +207,72 @@ else if (_page is not null)
     protected override async Task OnParametersSetAsync()
     {
         _searchText = Query;
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
-    {
-        // Several loads can overlap (e.g. fast clicks on the pager). Only the latest one may update the page.
         int version = ++_loadVersion;
-        _loading = true;
-        _loadError = null;
 
         try
         {
-            int page = Math.Max(1, PageNumber ?? 1);
-            PagedResult<Product> result = await ProductService.GetPageAsync(Query, (page - 1) * PageSize, PageSize, ComponentToken);
-            if (version == _loadVersion)
+            if (IsSearching)
             {
-                _page = result;
-            }
-        }
-        catch (ApiException ex)
-        {
-            if (version == _loadVersion)
-            {
-                _loadError = ex;
                 _page = null;
+                ProductSearchResult result = await ProductService.SearchAsync(Query!, Skip, PageSize, ComponentToken);
+                if (version == _loadVersion)
+                {
+                    _searchResult = result;
+                    _page = result.Page;
+                }
+
+                return;
             }
+
+            // LEARN: Stale-while-revalidate. First show what's saved on this device, which is instant and works
+            // offline. Then ask the server for anything newer, and re-read the local page only if something changed.
+            // The user never waits on the network to see data, and the network never overwrites unsent local changes.
+            _searchResult = null;
+            await LoadLocalPageAsync(version);
+            StateHasChanged();
+            await RefreshAsync(force: false);
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {
             // The user left the page; nothing to update.
         }
+    }
+
+    private async Task LoadLocalPageAsync(int version)
+    {
+        PagedResult<Product> page = await ProductService.GetPageAsync(Skip, PageSize, ComponentToken);
+        DateTimeOffset? lastRefreshed = await ProductService.GetLastRefreshedAsync(ComponentToken);
+        if (version == _loadVersion)
+        {
+            _page = page;
+            _lastRefreshed = lastRefreshed;
+        }
+    }
+
+    private async Task RefreshAsync(bool force)
+    {
+        if (_refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        try
+        {
+            _refreshResult = await ProductService.RefreshCatalogueAsync(force, ComponentToken);
+
+            // Reload whichever page is showing now: the user may have paged on while the refresh ran.
+            if (_refreshResult.Status == RefreshStatus.Refreshed && !IsSearching)
+            {
+                await LoadLocalPageAsync(_loadVersion);
+            }
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
         finally
         {
-            if (version == _loadVersion)
-            {
-                _loading = false;
-            }
+            _refreshing = false;
         }
     }
 
@@ -242,7 +312,7 @@ else if (_page is not null)
 
     private async Task DeleteAsync()
     {
-        if (_pendingDelete is not { } product || _page is null)
+        if (_pendingDelete is not { } product)
         {
             return;
         }
@@ -252,16 +322,21 @@ else if (_page is not null)
         try
         {
             await ProductService.DeleteAsync(product.Id, ComponentToken);
-
-            // Remove the row from what is on screen. DummyJSON doesn't really delete anything, so the
-            // product comes back on the next reload. That's the behaviour Phase 2's local store fixes.
-            _page = _page with
-            {
-                Items = [.. _page.Items.Where(item => item.Id != product.Id)],
-                TotalCount = _page.TotalCount - 1,
-            };
-            _notice = $"Deleted “{product.Details.Title}”. DummyJSON doesn't persist deletes, so it will reappear when the list reloads.";
+            _notice = $"Deleted “{product.Details.Title}”. DummyJSON doesn't persist deletes, but this device remembers it, so it stays deleted here.";
             _pendingDelete = null;
+
+            if (IsSearching)
+            {
+                _page = _page is null ? null : _page with
+                {
+                    Items = [.. _page.Items.Where(item => item.Id != product.Id)],
+                    TotalCount = _page.TotalCount - 1,
+                };
+            }
+            else
+            {
+                await LoadLocalPageAsync(_loadVersion);
+            }
         }
         catch (ApiException ex)
         {

@@ -15,8 +15,8 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
 {
     // LEARN: Every byte of a response travels over the user's connection and is parsed on the browser's
     // single UI thread. `select` asks DummyJSON for only the fields the app shows, instead of every product
-    // with all its reviews, dimensions and image lists.
-    private const string ProductFields = "title,description,category,brand,price,discountPercentage,rating,stock,thumbnail";
+    // with all its reviews, dimensions and image lists. `meta` is included for its updatedAt, used as the version.
+    private const string ProductFields = "title,description,category,brand,price,discountPercentage,rating,stock,thumbnail,meta";
 
     private readonly HttpClient _httpClient;
 
@@ -25,29 +25,29 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
         _httpClient = httpClient;
     }
 
-    public async Task<PagedResult<Product>> GetPageAsync(int skip, int take, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ServerProduct>> GetAllAsync(CancellationToken cancellationToken)
     {
-        string uri = string.Create(CultureInfo.InvariantCulture, $"products?limit={take}&skip={skip}&select={ProductFields}");
-        DummyJsonProductPage page = await GetAsync<DummyJsonProductPage>(uri, cancellationToken);
-        return ToPagedResult(page, skip, take);
+        // limit=0 asks DummyJSON for everything in one response (about 25 KB compressed for 194 products).
+        DummyJsonProductPage page = await GetAsync<DummyJsonProductPage>($"products?limit=0&select={ProductFields}", cancellationToken);
+        return [.. page.Products.Select(ToServerProduct)];
     }
 
-    public async Task<PagedResult<Product>> SearchAsync(string query, int skip, int take, CancellationToken cancellationToken)
+    public async Task<PagedResult<ServerProduct>> SearchAsync(string query, int skip, int take, CancellationToken cancellationToken)
     {
         string uri = string.Create(
             CultureInfo.InvariantCulture,
             $"products/search?q={Uri.EscapeDataString(query)}&limit={take}&skip={skip}&select={ProductFields}");
         DummyJsonProductPage page = await GetAsync<DummyJsonProductPage>(uri, cancellationToken);
-        return ToPagedResult(page, skip, take);
+        return new PagedResult<ServerProduct>([.. page.Products.Select(ToServerProduct)], page.Total, skip, take);
     }
 
-    public async Task<Product?> GetByIdAsync(int id, CancellationToken cancellationToken)
+    public async Task<ServerProduct?> GetByIdAsync(int serverId, CancellationToken cancellationToken)
     {
-        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{id}?select={ProductFields}");
+        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{serverId}?select={ProductFields}");
         try
         {
             DummyJsonProduct product = await GetAsync<DummyJsonProduct>(uri, cancellationToken);
-            return ToDomain(product);
+            return ToServerProduct(product);
         }
         catch (ApiException ex) when (ex.Kind == ApiFailureKind.NotFound)
         {
@@ -60,24 +60,24 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
         return await GetAsync<List<string>>("products/category-list", cancellationToken);
     }
 
-    public async Task<Product> CreateAsync(ProductDetails details, CancellationToken cancellationToken)
+    public async Task<ServerProduct> CreateAsync(ProductDetails details, CancellationToken cancellationToken)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, "products/add") { Content = JsonContent.Create(ToWrite(details)) };
         DummyJsonProduct created = await SendAsync<DummyJsonProduct>(request, cancellationToken);
-        return ToDomain(created);
+        return ToServerProduct(created);
     }
 
-    public async Task<Product> UpdateAsync(int id, ProductDetails details, CancellationToken cancellationToken)
+    public async Task<ServerProduct> UpdateAsync(int serverId, ProductDetails details, CancellationToken cancellationToken)
     {
-        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{id}");
+        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{serverId}");
         using HttpRequestMessage request = new(HttpMethod.Put, uri) { Content = JsonContent.Create(ToWrite(details)) };
         DummyJsonProduct updated = await SendAsync<DummyJsonProduct>(request, cancellationToken);
-        return ToDomain(updated);
+        return ToServerProduct(updated);
     }
 
-    public async Task DeleteAsync(int id, CancellationToken cancellationToken)
+    public async Task DeleteAsync(int serverId, CancellationToken cancellationToken)
     {
-        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{id}");
+        string uri = string.Create(CultureInfo.InvariantCulture, $"products/{serverId}");
         using HttpRequestMessage request = new(HttpMethod.Delete, uri);
         using HttpResponseMessage response = await SendCoreAsync(request, cancellationToken);
     }
@@ -166,13 +166,7 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
         }
     }
 
-    private static PagedResult<Product> ToPagedResult(DummyJsonProductPage page, int skip, int take)
-    {
-        Product[] items = [.. page.Products.Select(ToDomain)];
-        return new PagedResult<Product>(items, page.Total, skip, take);
-    }
-
-    private static Product ToDomain(DummyJsonProduct product)
+    private static ServerProduct ToServerProduct(DummyJsonProduct product)
     {
         try
         {
@@ -186,7 +180,12 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
                 product.Stock ?? 0);
 
             Uri? thumbnail = Uri.TryCreate(product.Thumbnail, UriKind.Absolute, out Uri? uri) ? uri : null;
-            return new Product(product.Id, details, product.Rating, thumbnail);
+            if (product.Id <= 0)
+            {
+                throw new ArgumentException("The product has no valid id.", nameof(product));
+            }
+
+            return new ServerProduct(product.Id, details, product.Rating, thumbnail, product.Meta?.UpdatedAt);
         }
         catch (ArgumentException ex)
         {

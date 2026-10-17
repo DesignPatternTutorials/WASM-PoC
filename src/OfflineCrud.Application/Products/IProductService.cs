@@ -7,8 +7,8 @@ namespace OfflineCrud.Application.Products;
 /// The product use cases the UI calls. Pages depend on this interface only.
 /// </summary>
 /// <remarks>
-/// In Phase 1 the implementation goes straight to the API. Later phases change the implementation to
-/// read from and write to IndexedDB first, without the pages having to change.
+/// Reads come from the products stored on this device, and the <c>Refresh…</c> members bring them up to date from
+/// the server (stale-while-revalidate). Writes still go to the server first in Phase 2. Phase 3 makes them local-first.
 /// </remarks>
 public interface IProductService
 {
@@ -18,21 +18,36 @@ public interface IProductService
     /// <summary>Largest allowed page size.</summary>
     public const int MaxPageSize = 100;
 
-    /// <summary>Gets one page of products, filtered by <paramref name="search"/> when it isn't blank.</summary>
-    Task<PagedResult<Product>> GetPageAsync(string? search, int skip, int take, CancellationToken cancellationToken);
+    /// <summary>Gets one page of the products stored on this device, ordered by title. Never touches the network.</summary>
+    Task<PagedResult<Product>> GetPageAsync(int skip, int take, CancellationToken cancellationToken);
 
-    /// <summary>Gets a single product, or <see langword="null"/> if it doesn't exist.</summary>
-    Task<Product?> GetAsync(int id, CancellationToken cancellationToken);
+    /// <summary>
+    /// Fetches the whole catalogue from the server and merges it into local storage, unless that was done recently
+    /// and <paramref name="force"/> is <see langword="false"/>.
+    /// </summary>
+    Task<RefreshResult> RefreshCatalogueAsync(bool force, CancellationToken cancellationToken);
 
-    /// <summary>Gets the available category slugs, sorted.</summary>
+    /// <summary>Gets when the catalogue was last refreshed from the server, or <see langword="null"/> if never.</summary>
+    Task<DateTimeOffset?> GetLastRefreshedAsync(CancellationToken cancellationToken);
+
+    /// <summary>Searches the server, or the products stored on this device if the server can't be reached.</summary>
+    Task<ProductSearchResult> SearchAsync(string query, int skip, int take, CancellationToken cancellationToken);
+
+    /// <summary>Gets a product stored on this device, or <see langword="null"/> if there is none or it was deleted.</summary>
+    Task<Product?> GetAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>Fetches one product from the server and merges it into local storage.</summary>
+    Task<RefreshResult> RefreshAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>Gets the category slugs, sorted. Falls back to the categories of stored products when offline.</summary>
     Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken cancellationToken);
 
-    /// <summary>Creates a product.</summary>
+    /// <summary>Creates a product on the server, then stores it on this device.</summary>
     Task<Product> CreateAsync(ProductDetails details, CancellationToken cancellationToken);
 
-    /// <summary>Updates a product's details.</summary>
-    Task<Product> UpdateAsync(int id, ProductDetails details, CancellationToken cancellationToken);
+    /// <summary>Updates a product on the server, then stores the result on this device.</summary>
+    Task<Product> UpdateAsync(Guid id, ProductDetails details, CancellationToken cancellationToken);
 
-    /// <summary>Deletes a product.</summary>
-    Task DeleteAsync(int id, CancellationToken cancellationToken);
+    /// <summary>Deletes a product on the server, then marks it deleted on this device.</summary>
+    Task DeleteAsync(Guid id, CancellationToken cancellationToken);
 }

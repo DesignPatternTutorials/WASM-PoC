@@ -16,6 +16,21 @@ public static class Formatting
     /// <summary>Formats a percentage with up to two decimal places, e.g. <c>12.5%</c>.</summary>
     public static string Percent(decimal value) => value.ToString("0.##", CultureInfo.CurrentCulture) + "%";
 
+    /// <summary>Describes how long ago <paramref name="time"/> was, e.g. <c>just now</c> or <c>5 minutes ago</c>.</summary>
+    public static string TimeAgo(DateTimeOffset time, DateTimeOffset now)
+    {
+        TimeSpan elapsed = now - time;
+        return elapsed.TotalSeconds switch
+        {
+            < 45 => "just now",
+            < 90 => "a minute ago",
+            < 3600 => $"{(int)Math.Round(elapsed.TotalMinutes)} minutes ago",
+            < 5400 => "an hour ago",
+            < 86_400 => $"{(int)Math.Round(elapsed.TotalHours)} hours ago",
+            _ => time.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.CurrentCulture),
+        };
+    }
+
     /// <summary>Turns a category slug such as <c>home-decoration</c> into <c>Home decoration</c>.</summary>
     public static string Category(string slug)
     {

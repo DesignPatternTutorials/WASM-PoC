@@ -1,0 +1,49 @@
+@* Says how fresh the locally stored data is, and whether a background refresh is running or failed.
+   This is the visible half of stale-while-revalidate: show the saved copy now, then say whether it's being updated. *@
+@inject TimeProvider TimeProvider
+
+<div class="d-flex flex-wrap align-items-center gap-2 small mb-3 @TextClass" role="status" aria-live="polite">
+    @if (IsRefreshing)
+    {
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Saved on this device. Checking DummyJSON for updates…</span>
+    }
+    else if (Result is { Status: RefreshStatus.Failed, Error: { } error })
+    {
+        <i class="bi @(error.Kind == ApiFailureKind.Network ? "bi-wifi-off" : "bi-exclamation-triangle")" aria-hidden="true"></i>
+        <span>
+            @(error.Kind == ApiFailureKind.Network ? "Offline." : $"Couldn't refresh: {error.Message}")
+            Showing the copy saved on this device@(LastRefreshedText is null ? "." : $", last updated {LastRefreshedText}.")
+        </span>
+        <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="OnRefresh">Try again</button>
+    }
+    else
+    {
+        <i class="bi bi-database-check" aria-hidden="true"></i>
+        <span>Saved on this device@(LastRefreshedText is null ? "." : $", updated {LastRefreshedText}.")</span>
+        <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="OnRefresh">Refresh now</button>
+    }
+</div>
+
+@code {
+    /// <summary>Whether a refresh is in flight.</summary>
+    [Parameter]
+    public bool IsRefreshing { get; set; }
+
+    /// <summary>The outcome of the last refresh, if any.</summary>
+    [Parameter]
+    public RefreshResult? Result { get; set; }
+
+    /// <summary>When the data was last refreshed from the server.</summary>
+    [Parameter]
+    public DateTimeOffset? LastRefreshed { get; set; }
+
+    /// <summary>Invoked when the user asks for a refresh.</summary>
+    [Parameter]
+    public EventCallback OnRefresh { get; set; }
+
+    private string? LastRefreshedText =>
+        LastRefreshed is { } last ? Formatting.TimeAgo(last, TimeProvider.GetUtcNow()) : null;
+
+    private string TextClass => Result?.Status == RefreshStatus.Failed ? "text-warning-emphasis" : "text-body-secondary";
+}
