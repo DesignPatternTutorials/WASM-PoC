@@ -1,16 +1,18 @@
 ﻿@inherits LayoutComponentBase
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+<div class="app-shell">
+    <NavMenu />
 
-        <article class="content px-4">
+    <main class="app-main">
+        <div class="container">
             @Body
-        </article>
+        </div>
     </main>
+
+    <footer class="app-footer py-3">
+        <div class="container d-flex flex-wrap justify-content-between gap-2">
+            <span>Offline CRUD: a Blazor WebAssembly learning project</span>
+            <span>Data from <a href="https://dummyjson.com" target="_blank" rel="noopener">DummyJSON</a></span>
+        </div>
+    </footer>
 </div>

@@ -4,13 +4,32 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OfflineCrud.Client</title>
+    <meta name="description" content="An offline-first Blazor WebAssembly CRUD app, built as a learning project." />
+    <meta name="theme-color" content="#312e81" />
+    <title>Offline CRUD</title>
     <base href="/" />
+    <script>
+        // Follow the operating system's light/dark preference with Bootstrap 5.3 colour modes. This runs
+        // before the stylesheets load, so the page never flashes the wrong theme.
+        (function () {
+            var media = window.matchMedia('(prefers-color-scheme: dark)');
+            function apply() {
+                document.documentElement.setAttribute('data-bs-theme', media.matches ? 'dark' : 'light');
+            }
+            apply();
+            media.addEventListener('change', apply);
+        })();
+    </script>
     <link rel="preload" id="webassembly" />
+    <!-- LEARN: Every stylesheet, script, font and icon is served from this app's own wwwroot, never a CDN.
+         The service worker can only cache what this origin serves, so a CDN link would break offline start-up. -->
     <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="lib/bootstrap-icons/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <link href="OfflineCrud.Client.styles.css" rel="stylesheet" />
+    <!-- No OfflineCrud.Client.styles.css link: the app has no .razor.css files, so no scoped-CSS bundle is generated.
+         Add the link back if a component gets one. -->
+
     <link href="manifest.webmanifest" rel="manifest" />
     <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
@@ -19,6 +38,8 @@
 
 <body>
     <div id="app">
+        <!-- LEARN: This markup shows while the browser downloads and starts the .NET runtime (several MB on
+             first visit). Blazor replaces it once the app is running. Blazor Server has no equivalent wait. -->
         <svg class="loading-progress">
             <circle r="40%" cx="50%" cy="50%" />
             <circle r="40%" cx="50%" cy="50%" />

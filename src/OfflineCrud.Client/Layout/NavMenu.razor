@@ -1,29 +1,42 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">Offline CRUD</a>
-        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+﻿<nav class="navbar navbar-expand-md app-navbar" data-bs-theme="dark" aria-label="Main">
+    <div class="container">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="">
+            <i class="bi bi-cloud-slash" aria-hidden="true"></i>
+            Offline CRUD
+        </a>
+
+        @* Toggled by Blazor state rather than Bootstrap's JavaScript, so no Bootstrap JS is loaded. *@
+        <button class="navbar-toggler" type="button" aria-controls="main-nav" aria-expanded="@(!_collapsed)"
+                aria-label="Toggle navigation" @onclick="Toggle">
             <span class="navbar-toggler-icon"></span>
         </button>
-    </div>
-</div>
 
-<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
+        <div id="main-nav" class="navbar-collapse @(_collapsed ? "collapse" : null)">
+            <ul class="navbar-nav ms-auto" @onclick="Collapse">
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                        <i class="bi bi-house me-1" aria-hidden="true"></i>Home
+                    </NavLink>
+                </li>
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="products">
+                        <i class="bi bi-box-seam me-1" aria-hidden="true"></i>Products
+                    </NavLink>
+                </li>
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="about">
+                        <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>About
+                    </NavLink>
+                </li>
+            </ul>
         </div>
-    </nav>
-</div>
+    </div>
+</nav>
 
 @code {
-    private bool collapseNavMenu = true;
+    private bool _collapsed = true;
 
-    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+    private void Toggle() => _collapsed = !_collapsed;
 
-    private void ToggleNavMenu()
-    {
-        collapseNavMenu = !collapseNavMenu;
-    }
+    private void Collapse() => _collapsed = true;
 }

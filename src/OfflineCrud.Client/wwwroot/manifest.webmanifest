@@ -1,11 +1,11 @@
 {
-  "name": "OfflineCrud.Client",
-  "short_name": "OfflineCrud.Client",
+  "name": "Offline CRUD",
+  "short_name": "Offline CRUD",
   "id": "./",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#03173d",
+  "theme_color": "#312e81",
   "prefer_related_applications": false,
   "icons": [
     {
