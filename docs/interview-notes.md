@@ -108,9 +108,9 @@ What to say:
 - **A stateful in-memory fake** of the stores for the sync engine. It stores *copies*, so "mutated but not saved" bugs
   fail tests.
 - **bUnit** for components: rendering, validation, focus management, live updates from services (`Client.Tests`).
-- **Gaps, and how they were covered:** JS modules and the service worker aren't covered by `dotnet test`. They were
-  checked with Node against `fake-indexeddb` and a mocked worker environment. A production project would add Playwright
-  end-to-end tests, including offline start-up.
+- **What `dotnet test` can't reach** (JS modules, the service worker, real network loss) is covered by **Playwright** in
+  `tests/e2e`. The published test stops the server and cuts the network, then checks the app starts from cache, accepts
+  changes, and syncs exactly one POST, one PUT and one DELETE when the network returns.
 
 ## What I'd do differently in production
 

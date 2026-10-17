@@ -667,3 +667,14 @@ ten-line fake (`FakeConnectivityService`) with `SetStatus` is clearer than Moq s
 - Tab from the address bar on any page: the first stop is "Skip to main content".
 - Run Lighthouse (DevTools → Lighthouse → Accessibility + PWA) against the published build from
   `publish-and-serve.ps1`, and fix what it finds.
+
+### Added after Phase 6: end-to-end tests
+
+`tests/e2e` runs the app in the installed Microsoft Edge with Playwright: start-up, the simulated-offline flow, and
+the published build starting with **the server stopped and the network off**, then syncing when it returns. See
+`tests/e2e/README.md`. Two lessons from setting it up:
+
+- **A test runner that prints nothing is the clue.** Playwright 1.48 hung on Node 24 before running a single test,
+  even `--list`. Upgrading Playwright fixed it. Check tool and runtime versions before suspecting your own code.
+- **Test the right build.** Offline start-up only exists in the published build, so the suite publishes first and serves
+  `artifacts/publish/wwwroot`. Testing against `dotnet run` would pass while proving nothing about the service worker.

@@ -24,6 +24,9 @@ dotnet publish src/OfflineCrud.Client -c Release -o artifacts/publish   # static
 ./scripts/publish-and-serve.ps1                # publish + external-reference check + serve on http://localhost:5200
 ./scripts/publish-and-serve.ps1 -NoServe       # publish + check only
 dotnet run tools/serve.cs -- artifacts/publish/wwwroot 5200   # serve an existing publish (paths relative to repo root)
+
+cd tests/e2e; npm install; npm test   # Playwright e2e in the installed Edge: publishes, then runs dev-server + published projects
+npm run test:dev                       # (from tests/e2e) dev-server tests only; `npx playwright test -g "<name>"` for one test
 ```
 
 Offline behaviour (the caching service worker) only exists in a **published** build; `dotnet run` uses the no-op `service-worker.js`. Test offline start-up against the publish output (steps in `docs/LEARNING.md`, Phase 5). `tools/serve.cs` is a .NET 10 file-based app with no project file. It runs with `tools/` as its working directory, and `Directory.Build.props` applies to it.
@@ -78,7 +81,14 @@ App shell rules (Phase 5):
 - **What it answers.** It only handles same-origin GETs; navigations get `index.html`. Never route DummyJSON or other cross-origin requests through it.
 - **No external URLs in the app shell.** `index.html` and the CSS must not reference other origins (`publish-and-serve.ps1` fails if they do). Vendor libraries into `wwwroot/lib`.
 - **Updates.** `index.html` announces a waiting worker; `UpdateBanner` + `wwwroot/js/pwa.js` post `SKIP_WAITING`; `controllerchange` reloads the page. Keep `updateViaCache: 'none'`.
-- **Checking the worker without a browser:** run it under Node with mocked `self`/`caches`/`fetch` against the publish output.
+- **Checking the worker:** `tests/e2e` (`published` project) proves offline start-up in a real browser with the server stopped and the network off. Run it after any change to the service worker, `index.html` or what's in `wwwroot`.
+
+End-to-end tests (`tests/e2e`):
+
+- Playwright (`@playwright/test`, pinned) driving the installed Microsoft Edge (`channel: 'msedge'`); no browser download.
+- Each spec starts its own server on its own port (5310/5311 dev, 5320 published) via `support/servers.mjs`, so a Visual Studio session isn't disturbed. Server output goes to `test-results/server-<port>.log`.
+- The tests use the real DummyJSON, so they need internet. Offline is simulated with `context.setOffline` plus blocking `dummyjson.com`, and, for the published test, by stopping the static server.
+- If a run prints nothing at all, suspect a Playwright/Node incompatibility (1.48 hung on Node 24).
 
 Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 
