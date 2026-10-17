@@ -75,8 +75,11 @@ Not every product has `brand`. Treat it as optional.
 - **Create, then later update or delete that item.** The update or delete targets id 195 (or whatever
   `total + 1` was), which the server doesn't have, so it gets `404`. Coalescing (create then delete →
   drop both; create then update → send one create with the latest data) avoids this when both happen
-  before a sync. If the create was already sent, the follow-up gets a 404 and goes to `Failed` with a
-  readable reason. That is the deliberate, non-crashing outcome the spec asks for.
+  before a sync. If the create was already sent:
+  - an **update** gets a 404 and goes to `Failed` with a readable reason. That is the deliberate, non-crashing outcome
+    the spec asks for.
+  - a **delete** gets a 404, which the sync engine counts as done. DELETE is idempotent, and "the server doesn't have
+    it" is the goal.
 - **Update an existing product (ids 1–194).** Succeeds every time, but a refresh from the API brings
   back the original values. The stale-while-revalidate refresh must not overwrite items that have
   pending changes. Items marked `Synced` *will* revert on refresh, and that is DummyJSON's behaviour,
@@ -98,7 +101,9 @@ Not every product has `brand`. Treat it as optional.
   `access-control-allow-credentials: true`.
 - The preflight (`OPTIONS`) returns `204` with `access-control-allow-methods: GET,HEAD,PUT,PATCH,POST,DELETE`,
   and **echoes any requested headers** in `access-control-allow-headers`. A custom `Idempotency-Key`
-  header is therefore allowed, even though DummyJSON ignores it.
+  header is therefore allowed, even though DummyJSON ignores it. The sync engine sends one on every write (the
+  outbox entry's id). Repeating a request with the same key gets a fresh response, not the original one, so DummyJSON
+  can't demonstrate deduplication.
 
 ## Rate limiting
 

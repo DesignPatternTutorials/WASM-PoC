@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store).
-- **Next:** Phase 3 (outbox + sync engine).
+- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine).
+- **Next:** Phase 4 (connectivity + UX).
 
 Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
@@ -49,6 +49,16 @@ Local storage rules (Phase 2):
 - **Writes after reads:** read-merge-write sequences take `ProductService._storeLock`.
 - **The JS module (`src/OfflineCrud.Infrastructure/wwwroot/js/indexedDb.js`):** the schema is versioned by the length of its `migrations` array. Add a step; never edit a shipped one. Multi-record writes must go through `writeAll()`, which aborts on synchronous errors so batches stay all-or-nothing. Field names in `ProductRecord` must match the index key paths in the JS (`ProductRecordMapperTests` checks them).
 - **Testing:** the JS module isn't covered by `dotnet test`. Check changes to it with a browser (DevTools → Application → IndexedDB) or a Node run against `fake-indexeddb`.
+
+Outbox and sync rules (Phase 3):
+
+- **Writes are local-first.** `ProductService` writes never call the API. They take the store lock, apply the change to the product, run `OutboxPlanner.Plan`, set the product's state from `plan.SyncState`, and write everything with one `IOutboxStore.CommitAsync` (one IndexedDB transaction across `products` and `outbox`). Then they call `ISyncTrigger.RequestSync()`.
+- **`SyncState` is always derived from the queued outbox entries** (`OutboxPlanner.DeriveSyncState`). Never set `Synced` directly after a send.
+- **Only `SyncService` calls the API's write methods.** It's FIFO per product, re-reads each entry under the lock before marking it `InFlight`, and passes the entry id as the idempotency key. It classifies failures with `ApiException.IsTransient`: retry with `RetryPolicy` backoff, otherwise `Failed`. Delete + 404 counts as success.
+- **`LocalStoreLock`** is shared by `ProductService` and `SyncService`. Every read-decide-write sequence takes it.
+- **All app-lifetime services are singletons in `Program.cs`.** `SyncScheduler` is started from the root provider, and a scoped registration would give it a different instance from the components.
+- **`SyncScheduler`** (Client) is the only thing that runs sync. Its `Changed` event drives the UI; subscribers must unsubscribe on dispose and re-render via `InvokeAsync`.
+- **Testing:** `tests/.../Fakes/InMemoryLocalStore.cs` implements both store ports and stores copies (like IndexedDB). Use it for stateful sync and service tests.
 
 Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 

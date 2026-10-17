@@ -242,3 +242,136 @@ save. It only protects this tab; two tabs share the database but not the lock.
   see "Downloading the catalogue…". Do it offline instead and you'll see the empty-state message.
 - **Schema upgrade.** Add a version-2 step to `migrations` (e.g. a new index), reload, and watch `oldVersion` /
   `newVersion` in a breakpoint on `onupgradeneeded`. Phase 3 does this for real when it adds the `outbox` store.
+
+## Phase 3: Outbox + sync engine
+
+### What was built
+
+- **Local-first writes.** `ProductService.CreateAsync` / `UpdateAsync` / `DeleteAsync` no longer touch the network.
+  Each one writes the product **and** its outbox entry in one IndexedDB transaction (`IOutboxStore.CommitAsync` →
+  `commit()` in `indexedDb.js`), then calls `ISyncTrigger.RequestSync()`. Create, edit and delete work offline.
+- **Schema version 2** adds the `outbox` store (indexes `byEntity`, `byCreated`). Existing products and metadata are
+  untouched by the upgrade.
+- **`OutboxPlanner`** (pure, tested) decides coalescing and derives each product's `SyncState` from what's queued.
+- **`SyncService`** is the engine: FIFO per product, mark in flight, send with `Idempotency-Key`, then complete,
+  retry or fail. **`RetryPolicy`** gives exponential backoff with jitter.
+- **`SyncScheduler`** (Client) is the one loop that runs the engine: at start-up (after recovering in-flight entries),
+  after each local write, every 30 s, and on "Sync now".
+- **UI:** a sync status line on the list ("2 changes waiting to sync · Sync now"), sync badges on rows, and the sync
+  state on the detail page. Both pages re-read local data whenever a sync run finishes.
+
+### Key concepts
+
+**The transactional outbox.** A change and the instruction to send it are written atomically. Without that, a crash
+between the two writes leaves either a change that's never sent or a request for a change the user can't see. IndexedDB
+transactions can span several stores if all are named when the transaction opens (`db.transaction([PRODUCTS, OUTBOX])`).
+On the server, the same pattern is "write the row and the message in one DB transaction, publish later".
+
+**The sync state is derived, never set by hand.** A product is `Synced` exactly when no outbox entries remain for it.
+Otherwise its state is `Failed` if any entry failed, or else the pending state of its newest entry
+(`OutboxPlanner.DeriveSyncState`). After every write and every sync step the state is recomputed from the queue. That's
+what keeps an edit made *while a create is in flight* showing as `PendingUpdate` instead of being marked `Synced` when
+the create returns.
+
+**Coalescing** (`OutboxPlanner.Plan`). A new change merges into the newest entry for that product unless that entry is
+in flight:
+
+| Queued | New change | Result |
+| --- | --- | --- |
+| nothing | create / update / delete | one new entry |
+| create | update | one create with the latest details |
+| update | update | one update with the latest details |
+| create (not sent) | delete | **both dropped**: the server never hears about it |
+| update | delete | just the delete |
+| in-flight anything | anything | a new entry queued behind it |
+| failed | update | the failed entry, reset to pending with the new details (editing is how you fix it) |
+
+The trade-off: fewer requests and fewer failures, but the server never sees intermediate states. That's fine when only
+the latest state matters, and wrong for audit logs or event sourcing.
+
+**Ordering.** Entries for one product are sent oldest first, and a product's later entries wait if an earlier one is
+failed, backing off or retrying (an update can't go before its create). Different products are independent, so one
+product's 5xx doesn't block another's. A *network* failure stops the whole run, because every request would fail the
+same way and each failure would add another attempt.
+
+**Classifying failures.** This comes from `ApiException.IsTransient`, built in Phase 1:
+- Network, 5xx, 429: retry with backoff. `Attempts`, `NextAttemptAt` and `LastError` are recorded. There's no
+  attempt limit, because being offline for a day is normal.
+- Other 4xx, or an unreadable response: `Failed`, with a readable `LastError`. The product shows "Sync failed" and the
+  entry is never retried automatically. (Retry/Discard buttons come in Phase 4.)
+- **Delete + 404 counts as success.** DELETE is idempotent: the goal is "the server doesn't have it", and a 404 says
+  exactly that. **Update + 404 fails** with a reason that explains DummyJSON's non-persistence.
+
+**Exponential backoff with jitter** (`RetryPolicy`). 2 s, 4 s, 8 s … capped at 5 minutes. "Equal jitter" keeps half
+of each delay fixed and randomises the other half, so a thousand clients coming back online at once don't retry in
+lock-step (the "thundering herd").
+
+**Idempotency keys.** Every write carries `Idempotency-Key: <entry id>`. If the tab closes while a request is out, the
+entry is still `InFlight` on the next start. `RecoverAsync` resets it to `Pending` and it's sent again. The server may
+already have applied it, and a server that honours the key recognises the repeat and returns the original result instead
+of creating a duplicate. DummyJSON ignores the header (see "How this would work against a real API" below).
+
+**One run at a time.** The scheduler is a single loop, and `SyncService.RunAsync` also refuses to overlap
+(`SemaphoreSlim.WaitAsync(0)`). Inside a run, each entry is **re-read under the store lock** just before sending,
+because the user may have merged a newer edit into it (or removed it) since the run took its snapshot.
+
+**Why sync only runs while the app is open.** Background Sync lets a *service worker* run after the tab closes, but
+service workers run JavaScript, and the .NET runtime only exists inside the open tab. A JS-only background sync would
+mean the service worker reading the IndexedDB outbox itself and replaying it with `fetch()` in a `sync` event, which
+duplicates the engine's rules in JS. Background Sync isn't available in Safari or Firefox either.
+
+**A correction to Phase 1's "scoped = singleton".** Components resolve services from one long-lived scope, but
+`Program.cs` resolves from the *root* provider. The scheduler is started from the root, so anything it shares with the
+pages (above all `LocalStoreLock`) has to be a real singleton. A scoped registration would quietly produce two instances,
+and the lock would lock nothing. All app-lifetime services are now registered as singletons.
+
+### How this would work against a real API
+
+DummyJSON doesn't persist anything, so some things can't be shown for real:
+
+- **Creates would stick**, and the server id recorded after a create would be usable for later updates. Here,
+  every create gets id 195 and later updates of it fail with 404, which is the deliberate "Failed with a readable reason"
+  path.
+- **Idempotency** needs the server to store `Idempotency-Key` → response for a while (typically 24 h), and to return the
+  stored response when a key repeats. Without that, retrying after a lost response can create duplicates.
+- **Conflict detection** needs versions on writes. The client sends `If-Match: <ServerVersion>` (an ETag or row
+  version). If someone else changed the record, the server answers `412 Precondition Failed` and the client must decide:
+  keep its version (re-send without the precondition), take the server's, or ask the user to merge. Here a 412 would
+  land as a `Failed` entry with a readable reason. Resolving it is a UI decision.
+- **Version returned on write.** A real PUT returns the new ETag. Storing it keeps the next refresh from re-applying our
+  own change (DummyJSON's PUT returns no version, so the old one is kept).
+- **Tombstone purge.** Once a delete is confirmed and the server stops returning the item, the local tombstone can be
+  removed.
+
+### Gotchas
+
+- **`Assert.Multiple(async () => …)`** binds to an `async void`-style delegate, and assertions after the first `await`
+  can run after the test has finished. Await first, then assert.
+- **Mutating isn't saving.** `Product` is a mutable class, so code can change one and forget to commit it. The
+  in-memory test store (`InMemoryLocalStore`) keeps *copies*, like IndexedDB's structured clones, so such a bug fails a
+  test instead of passing by accident.
+- **Commit with `CancellationToken.None`.** Once the decision to write is made, the .NET side must not stop waiting
+  halfway while the JS transaction commits anyway. The caller would then wonder whether it happened.
+- **A snapshot can go stale mid-run.** The engine's first draft marked entries in flight from the snapshot it took at the
+  start of the run, which would have overwritten an edit merged in meanwhile. It now re-reads each entry under the lock
+  (`SyncServiceTests.EntryChangedAfterTheRunStarted_IsSentWithItsLatestPayload`).
+
+### Things to try
+
+- **The whole point.** Go offline (DevTools → Network → Offline). Create a product, edit another, delete a third. Each
+  change shows immediately with a "not synced" badge, and the status line says "3 changes waiting to sync". Look at
+  DevTools → Application → IndexedDB → `offline-crud` → `outbox`. Go back online and press "Sync now" (or wait up to
+  30 s): watch the outbox drain and the badges disappear.
+- **Coalescing.** Offline, create a product, edit it twice, then delete it. The outbox goes 1 → 1 → 1 → 0 entries.
+  Nothing is ever sent.
+- **Backoff.** Offline, edit a product and keep the list open. Each time the entry comes due it's tried again, and its
+  `attempts` and `nextAttemptAt` grow (about 2 s, 4 s, 8 s …, ± jitter). The status line shows "Next retry in N
+  seconds". Pressing "Sync now" while it's backing off doesn't add attempts: an entry isn't sent before its time. (The
+  scheduler wakes when the earliest retry is due, so short backoffs aren't stretched to the 30-second tick.)
+- **A permanent failure.** Online, create a product and wait for it to sync (it gets server id 195). Then edit it. The
+  update gets a 404 and the product shows "Sync failed". The entry's `lastError` explains why. Edit it again: the failed
+  entry becomes pending and is tried once more.
+- **Recovery.** Throttle to Slow 3G, make an edit, and close the tab while the request is out. Reopen: the in-flight
+  entry is reset and sent again, with the same `Idempotency-Key` (check the request headers).
+- **Schema upgrade, for real.** If you ran Phase 2, your browser has a version-1 database. Loading this build upgrades it
+  to version 2. The products are still there, and there's a new `outbox` store.
