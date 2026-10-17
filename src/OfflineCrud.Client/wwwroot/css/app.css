@@ -91,8 +91,23 @@
     border-color: var(--app-brand);
 }
 
-h1:focus {
+/* FocusOnNavigate moves focus to the page's h1, and the skip link moves it to <main>. Both are programmatic focus targets,
+   not controls, so no focus ring. Real controls keep Bootstrap's visible focus styles. */
+h1:focus,
+main:focus {
     outline: none;
+}
+
+.skip-link {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 1100;
+    padding: 0.5rem 1rem;
+    border-radius: var(--bs-border-radius);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-link-color);
+    box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
 }
 
 /* ==========================================================================
