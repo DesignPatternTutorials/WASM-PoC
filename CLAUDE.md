@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine), Phase 4 (connectivity + UX).
-- **Next:** Phase 5 (PWA / app shell offline).
+- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine), Phase 4 (connectivity + UX), Phase 5 (PWA / app shell offline).
+- **Next:** Phase 6 (polish: bUnit tests, accessibility, finish `LEARNING.md` and `interview-notes.md`).
 
 Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
@@ -21,9 +21,12 @@ dotnet test                                    # all tests
 dotnet test --filter "FullyQualifiedName~ArchitectureTests.Domain_DoesNotReferenceAnyOtherSolutionProject"   # one test
 dotnet run --project src/OfflineCrud.Client    # dev server on http://localhost:5121 (https profile: 7227)
 dotnet publish src/OfflineCrud.Client -c Release -o artifacts/publish   # static site in artifacts/publish/wwwroot
+./scripts/publish-and-serve.ps1                # publish + external-reference check + serve on http://localhost:5200
+./scripts/publish-and-serve.ps1 -NoServe       # publish + check only
+dotnet run tools/serve.cs -- artifacts/publish/wwwroot 5200   # serve an existing publish (paths relative to repo root)
 ```
 
-Offline behaviour (the caching service worker) only exists in a **published** build. `dotnet run` uses the no-op `service-worker.js`. A script to serve the publish output locally is planned for Phase 5.
+Offline behaviour (the caching service worker) only exists in a **published** build; `dotnet run` uses the no-op `service-worker.js`. Test offline start-up against the publish output (steps in `docs/LEARNING.md`, Phase 5). `tools/serve.cs` is a .NET 10 file-based app with no project file. It runs with `tools/` as its working directory, and `Directory.Build.props` applies to it.
 
 ## Architecture
 
@@ -67,6 +70,14 @@ Connectivity and UX rules (Phase 4):
 - **Background events reach the user through `BackgroundNotifier`**, which turns `SyncScheduler.RunCompleted` and connectivity changes into toasts via `ToastService`. Keep toasts for background outcomes; actions the user just took get inline confirmation on the page.
 - **Outbox management (Retry, Discard, Clear) lives on `ISyncService`.** Discard lets the server win (see `DiscardAsync`). Clear waits for a running sync.
 - **Components that subscribe to singleton events** (`Changed`, `RunCompleted`) must unsubscribe in `Dispose` and re-render via `InvokeAsync(StateHasChanged)`.
+
+App shell rules (Phase 5):
+
+- **What the service worker caches.** `wwwroot/service-worker.published.js` caches **everything** in the SDK's asset manifest except `offlineAssetsExclude` (the worker itself, `.map`, `LICENSE`). Anything added to `wwwroot` or an RCL's `wwwroot` is downloaded on install, so keep them free of unused files. Cache lookups use `ignoreSearch`.
+- **What it answers.** It only handles same-origin GETs; navigations get `index.html`. Never route DummyJSON or other cross-origin requests through it.
+- **No external URLs in the app shell.** `index.html` and the CSS must not reference other origins (`publish-and-serve.ps1` fails if they do). Vendor libraries into `wwwroot/lib`.
+- **Updates.** `index.html` announces a waiting worker; `UpdateBanner` + `wwwroot/js/pwa.js` post `SKIP_WAITING`; `controllerchange` reloads the page. Keep `updateViaCache: 'none'`.
+- **Checking the worker without a browser:** run it under Node with mocked `self`/`caches`/`fetch` against the publish output.
 
 Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 

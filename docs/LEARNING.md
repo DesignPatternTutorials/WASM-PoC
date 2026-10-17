@@ -463,3 +463,106 @@ took.
 - **Discard a delete.** Make DummyJSON reject a delete? It won't (a 404 counts as success), so this path is only exercised
   by the unit tests (`SyncServiceTests.DiscardAsync_FailedDelete_BringsTheProductBack`). Read it there.
 - **Clear local data.** On the Sync page, clear everything, then open Products: the catalogue downloads again from scratch.
+
+## Phase 5: PWA / app shell offline
+
+### What was built
+
+- **`service-worker.published.js`** rewritten from the template:
+  - it caches every file in the SDK's asset manifest except a short exclude list;
+  - cache lookups ignore query strings;
+  - it only answers same-origin GETs;
+  - it supports a user-triggered update (`SKIP_WAITING`).
+- **Update flow:** `index.html` notices a newly installed worker waiting, `wwwroot/js/pwa.js` tells Blazor, and
+  `UpdateBanner` offers "Reload to update".
+- **`scripts/publish-and-serve.ps1`:** publishes Release, fails if the app shell references another origin, and serves
+  the result.
+- **`tools/serve.cs`:** a static file server with SPA fallback, written as a **.NET 10 file-based app** (`dotnet run
+  tools/serve.cs`, no project file).
+- **Leaner app shell:** the vendored Bootstrap was cut to the single stylesheet in use. The cache manifest went from
+  121 files to 79.
+
+### Key concepts
+
+**Two layers of offline.** The *app shell* (HTML, CSS, JS, fonts, the .NET runtime, your DLLs) is cached by the
+service worker in Cache Storage. The *data* is in IndexedDB, handled by the app. Phases 2–4 made the data work offline
+once the app was running. This phase makes the app *start* offline. Both are needed: without the shell, an offline
+reload is the browser's "No internet" page; without the data, the app starts and has nothing to show.
+
+**How the service worker caches.** At publish, the SDK writes `service-worker-assets.js`: every file plus its SHA-256
+hash, and a `version` derived from all the hashes. On install the worker downloads them all into a cache named after
+that version, with `integrity` so a corrupt or half-deployed file fails the install (and the old version keeps running).
+On activate it deletes older caches. On fetch, same-origin GETs are answered from the cache, and navigations (any URL
+typed or reloaded) get `index.html` so Blazor's router can take over offline. Requests to other origins (DummyJSON, its
+image CDN) aren't touched at all.
+
+**The update lifecycle** (often asked in interviews):
+1. You publish. `service-worker-assets.js` changes, so the service worker's script bytes change.
+2. On the next visit the browser fetches `service-worker.js` (never from the HTTP cache, because of `updateViaCache: 'none'`),
+   sees it's different, and *installs* the new worker in the background. That's a full download of the new files.
+3. The new worker *waits*. The old one keeps serving every open tab, so no page ever mixes old and new files. This is
+   the "users are stuck on the old version" effect: by default the new version only takes over when every tab is
+   closed.
+4. Here, `index.html` notices the waiting worker and the app shows "A new version is available". Clicking it posts
+   `SKIP_WAITING`, the new worker activates, `controllerchange` fires, and the page reloads onto the new version.
+
+**Why only a published build.** `dotnet run` serves `service-worker.js`, which does nothing, so development always
+gets fresh files. `dotnet publish` copies `service-worker.published.js` over it (the `<ServiceWorker>` item in the
+csproj). Offline start-up can only be tested on the publish output, served by any static host.
+
+**Secure context.** Service workers only register on HTTPS or `localhost`. That's why `tools/serve.cs` uses plain HTTP
+on localhost, and why a real deployment must be HTTPS.
+
+**Trimming.** `dotnet publish` trims framework assemblies (`TrimMode=partial`: only assemblies marked trimmable, which
+excludes the app's own). That's why JSON (de)serialisation of the app's DTOs keeps working: their constructors and
+properties, used by reflection, aren't removed. The publish produces no trim warnings (`IL2xxx`); keep it that way.
+
+### Gotchas
+
+- **The template's cache allow-list missed `.woff2` and `.svg`.** The icon font and the placeholder image would have
+  silently been missing offline. The worker now caches everything in the manifest unless excluded. That's safer by
+  default, but everything in `wwwroot` gets downloaded on install, so don't leave unused files there.
+- **Query strings defeat exact cache matches.** Bootstrap Icons' CSS asks for `bootstrap-icons.woff2?<hash>`. With
+  `cache.match(request)` that misses the cached `bootstrap-icons.woff2`, so `ignoreSearch: true` is used.
+- **The first visit isn't offline-capable yet.** The page loads, *then* the worker installs and downloads everything.
+  Offline only works once DevTools shows the worker as *activated*.
+- **`respondWith` for everything** (as the template does) routes cross-origin and non-GET requests through the worker for
+  no benefit. Returning without `respondWith` lets the browser handle them natively.
+- **A dangling `sourceMappingURL`.** Removing Bootstrap's `.map` files left a comment pointing at one, which DevTools
+  would 404 on. It's been removed from the CSS.
+- **File-based apps run in their own folder.** `dotnet run tools/serve.cs` sets the working directory to `tools/`, so
+  the server resolves relative paths against the repo root instead.
+- **Clearing site data clears both layers.** DevTools → Application → "Clear site data" removes the service worker,
+  Cache Storage *and* IndexedDB, including unsent changes.
+
+### The offline start-up test
+
+```powershell
+./scripts/publish-and-serve.ps1        # publishes, checks, serves on http://localhost:5200
+```
+
+1. Open http://localhost:5200 and visit **Products** once, so the catalogue is in IndexedDB.
+2. DevTools → Application → **Service workers**: wait for "activated and is running". **Cache Storage** →
+   `offline-cache-<version>` should list ~78 files.
+3. DevTools → Network → **Offline** (or stop the server with Ctrl+C: that's the strictest test).
+4. **Reload.** The app must start: the loading circle, then the home page, with the "You're offline" banner.
+5. Open **Products**: the saved list appears ("Offline. Showing the copy saved on this device"). Open a product. Icons
+   show; product photos show the placeholder (they're on DummyJSON's CDN and aren't cached).
+6. Create a product, edit another, delete a third. Each shows as not synced. **Sync** shows 3 waiting.
+7. Go back online (untick Offline, or restart the server). The banner goes, "Back online" appears, the outbox drains, and
+   "Synced 3 changes" is shown.
+8. Deep links: offline, type `http://localhost:5200/sync` straight into the address bar. It loads.
+
+### Things to try
+
+- **See an update arrive.** With the app open, change some visible text (e.g. the home page hero), run the script again,
+  and refresh once. The "A new version is available" banner appears, and the old version keeps running until you click it.
+  In DevTools → Application → Service workers you'll see the new worker "waiting to activate".
+- **Watch the integrity check.** Edit a file in `artifacts/publish/wwwroot` by hand (one that's in the manifest) without
+  republishing, then trigger an update. The install fails, because the hash doesn't match, and the old version keeps
+  working.
+- **Compare with the template.** `git show c01165c:src/OfflineCrud.Client/wwwroot/service-worker.published.js` (the
+  scaffold commit) and look for `.woff2` in its allow-list. It isn't there.
+- **Stretch: offline product images.** Add a runtime cache for `cdn.dummyjson.com` thumbnails (cache-first, size-capped).
+  The responses are cross-origin and *opaque*, which counts heavily against the storage quota. Think about how many to
+  keep.
