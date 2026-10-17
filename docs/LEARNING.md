@@ -375,3 +375,91 @@ DummyJSON doesn't persist anything, so some things can't be shown for real:
   entry is reset and sent again, with the same `Idempotency-Key` (check the request headers).
 - **Schema upgrade, for real.** If you ran Phase 2, your browser has a version-1 database. Loading this build upgrades it
   to version 2. The products are still there, and there's a new `outbox` store.
+
+## Phase 4: Connectivity + UX
+
+### What was built
+
+- **`IConnectivityService`** (Application port) with four states: `Online`, `Offline`, `Unreachable` and
+  `SimulatedOffline`. **`BrowserConnectivityService`** (Infrastructure) combines three signals: `navigator.onLine`
+  and its `online`/`offline` events (from `wwwroot/js/connectivity.js`), the outcome of real requests, and the
+  "Simulate offline" switch.
+- **`ConnectivityHandler`**, a `DelegatingHandler` in front of every DummyJSON request. A request with no response
+  marks the server unreachable; any response marks it reachable. While simulating offline it fails every request before
+  it's sent.
+- **Scheduler:** pauses while certainly offline, and syncs as soon as the connection is back.
+- **Layout:** a banner when not online, the "Simulate offline" switch and a pending-changes count on "Sync" in the
+  menu bar, and toasts for sync outcomes and connectivity changes (`ToastService`, `ToastHost`, `BackgroundNotifier`).
+- **Sync page (`/sync`):** the outbox with status, attempts, next retry, last error and idempotency key; "Sync now";
+  Retry / Discard for failed entries; "Clear local data" behind a confirmation.
+- The products list revalidates the catalogue when the connection comes back, and deletes are confirmed with a toast.
+
+### Key concepts
+
+**`navigator.onLine` is a one-way signal.** `false` is reliable: there's no network. `true` only means "connected to
+*some* network", which includes Wi-Fi with no internet, a captive portal, a VPN that's down, or a server that's
+simply not answering. So the app treats a failed request as offline too (`Unreachable`) until a request succeeds or the
+browser fires `online`. This is the interview answer to "how do you detect offline in a browser?".
+
+**JS → .NET calls.** `connectivity.js` receives a `DotNetObjectReference` and calls
+`invokeMethodAsync('OnBrowserConnectivityChanged', navigator.onLine)` on each event. That reaches the `[JSInvokable]`
+method on the C# object. It's async and JSON-serialised, like the other direction. The reference pins the object in
+memory, so it's disposed (after removing the JS listeners) in `DisposeAsync`.
+
+**Simulating offline in the HTTP pipeline.** `ConnectivityHandler` throws the same `HttpRequestException` a real
+offline `fetch()` produces, before anything is sent. Because it sits below the API client, everything above (the
+client's error mapping, the sync engine's retry logic, the pages' fallbacks) takes exactly the path it would offline.
+That's a good argument for the handler pipeline that `IHttpClientFactory` provides, even in the browser.
+
+**Don't sync while certainly offline.** The scheduler skips runs when the status is `Offline` or `SimulatedOffline`.
+Each attempt would fail and push the entry's next retry further out, so an hour offline would leave a 5-minute wait
+when the connection came back. `Unreachable` still runs, because only a request can tell when the server is back. On the
+transition back to `Online` the scheduler requests a run at once.
+
+**Discard means "let the server win".** Discarding a failed change:
+- **create:** the server never had the product, so it's removed from this device (tombstoned), along with anything
+  queued after it;
+- **update:** `ForgetServerVersion()` clears the version the local copy was based on, so the next server copy
+  replaces it. The page fetches it at once (`RefreshAsync`);
+- **delete:** the product is restored and its version forgotten, so the server's copy comes back.
+
+Retry just resets the entry to pending with a clean retry history.
+
+**"Clear local data" waits for a sync run to finish.** Otherwise a run could write back records it read before the
+clear. `ClearLocalDataAsync` takes the run gate with a real wait (not the `WaitAsync(0)` that overlapping runs use), then
+the store lock, then empties all three stores in one transaction. There's a test for exactly this race.
+
+**Background events become toasts in one place.** `BackgroundNotifier` (in the layout) listens to the scheduler and the
+connectivity service and decides what's worth a toast. Only runs that sent or failed something produce one, otherwise
+the 30-second timer would toast every half minute. Pages show their own inline confirmations for actions the user just
+took.
+
+### Gotchas
+
+- **A timeout can't be seen from a `DelegatingHandler`.** HttpClient enforces `Timeout` by cancelling the token it
+  passes down the pipeline, so inside a handler a timeout looks the same as the caller cancelling. The handler only
+  reports `HttpRequestException` as "unreachable". The API client still turns a timeout into a `Network` failure.
+- **Every subscriber must unsubscribe.** Components that handle `Changed` events from singletons (scheduler,
+  connectivity, toasts) unsubscribe in `Dispose`. Otherwise the singleton keeps the dead component alive and calls
+  `StateHasChanged` on it.
+- **"Simulate offline" isn't remembered.** It resets when the page reloads, and it only blocks the app's own `HttpClient`
+  requests. Images from DummyJSON's CDN still load. DevTools → Network → Offline blocks everything, including images and
+  (after Phase 5) the app shell's network fallback.
+
+### Things to try
+
+- **Simulate offline.** Flip the switch in the menu bar. A purple banner appears and a toast says you're offline. Edit
+  two products and create one. The "Sync" link shows **3**. Open the Sync page: the entries are `Pending` and "Syncing is
+  paused while you're offline" is shown. Flip the switch back: a toast says "Back online", the outbox drains, and "Synced
+  3 changes" appears.
+- **Real offline.** DevTools → Network → Offline instead of the switch. The banner says "You're offline". Same
+  behaviour. Note that the browser fired the `offline` event: set a breakpoint in `OnBrowserConnectivityChanged`.
+- **Unreachable.** Edit `wwwroot/appsettings.json` to point at `https://dummyjson.invalid/`, reload, and refresh the
+  list. The browser is online but requests fail, so the banner says "DummyJSON can't be reached". Syncing keeps
+  probing on its backoff schedule.
+- **Retry and Discard.** Online, create a product and let it sync (server id 195). Edit it: the update fails with 404 and
+  shows on the Sync page with the reason. Try Retry (fails again, for the same reason), then Discard (the entry goes,
+  the product is marked Synced and keeps its local details, because DummyJSON has no copy to restore).
+- **Discard a delete.** Make DummyJSON reject a delete? It won't (a 404 counts as success), so this path is only exercised
+  by the unit tests (`SyncServiceTests.DiscardAsync_FailedDelete_BringsTheProductBack`). Read it there.
+- **Clear local data.** On the Sync page, clear everything, then open Products: the catalogue downloads again from scratch.

@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine).
-- **Next:** Phase 4 (connectivity + UX).
+- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine), Phase 4 (connectivity + UX).
+- **Next:** Phase 5 (PWA / app shell offline).
 
 Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
@@ -58,7 +58,15 @@ Outbox and sync rules (Phase 3):
 - **`LocalStoreLock`** is shared by `ProductService` and `SyncService`. Every read-decide-write sequence takes it.
 - **All app-lifetime services are singletons in `Program.cs`.** `SyncScheduler` is started from the root provider, and a scoped registration would give it a different instance from the components.
 - **`SyncScheduler`** (Client) is the only thing that runs sync. Its `Changed` event drives the UI; subscribers must unsubscribe on dispose and re-render via `InvokeAsync`.
-- **Testing:** `tests/.../Fakes/InMemoryLocalStore.cs` implements both store ports and stores copies (like IndexedDB). Use it for stateful sync and service tests.
+- **Testing:** `tests/.../Fakes/InMemoryLocalStore.cs` implements both store ports (and `ILocalDatabase`) and stores copies (like IndexedDB). Use it for stateful sync and service tests.
+
+Connectivity and UX rules (Phase 4):
+
+- **Connectivity has one source of truth:** `IConnectivityService` (`BrowserConnectivityService`). It combines `navigator.onLine` events (`wwwroot/js/connectivity.js`, calling a `[JSInvokable]`), request outcomes reported by `ConnectivityHandler` (in the `IProductApiClient` HttpClient pipeline), and "Simulate offline". The handler implements simulated offline by throwing `HttpRequestException` before sending, so nothing else special-cases it.
+- **`SyncScheduler` pauses while certainly offline** (`Offline` or `SimulatedOffline`, but not `Unreachable`) and requests a run when the status returns to `Online`.
+- **Background events reach the user through `BackgroundNotifier`**, which turns `SyncScheduler.RunCompleted` and connectivity changes into toasts via `ToastService`. Keep toasts for background outcomes; actions the user just took get inline confirmation on the page.
+- **Outbox management (Retry, Discard, Clear) lives on `ISyncService`.** Discard lets the server win (see `DiscardAsync`). Clear waits for a running sync.
+- **Components that subscribe to singleton events** (`Changed`, `RunCompleted`) must unsubscribe in `Dispose` and re-render via `InvokeAsync(StateHasChanged)`.
 
 Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 
