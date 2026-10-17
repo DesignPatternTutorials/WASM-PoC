@@ -36,11 +36,30 @@ builder.Services.AddSingleton<ToastService>();
 
 WebAssemblyHost host = builder.Build();
 
-// LEARN: JS interop already works here, before RunAsync: the .NET runtime was started by blazor.webassembly.js, so
-// the browser and its APIs are right there. Connectivity starts first, so the first sync run knows whether to bother.
-await host.Services.GetRequiredService<IConnectivityService>().StartAsync(CancellationToken.None);
-
-// Start syncing as soon as the app starts: send anything left over from the last session.
-host.Services.GetRequiredService<SyncScheduler>().Start();
+// LEARN: Don't make start-up wait on anything optional. Awaiting a JS module import here, before RunAsync, means that
+// if the import is slow or fails (a 404 for a _content/ file after an incremental rebuild, a blocked script), the app
+// never renders and the loading screen spins forever. Background services start alongside the UI instead, and a
+// failure is logged to the browser console rather than stopping the app.
+_ = StartBackgroundServicesAsync(host.Services);
 
 await host.RunAsync();
+
+static async Task StartBackgroundServicesAsync(IServiceProvider services)
+{
+    ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("OfflineCrud.Startup");
+    try
+    {
+        // Connectivity first, so the first sync run knows whether to bother. JS interop works before RunAsync: the .NET
+        // runtime was started by blazor.webassembly.js, so the browser's APIs are already there.
+        await services.GetRequiredService<IConnectivityService>().StartAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        // Without browser events the app still works: request failures still mark it offline.
+        logger.LogError(ex, "Connectivity monitoring couldn't start; relying on request failures only.");
+    }
+
+    // Start syncing as soon as the app starts: send anything left over from the last session. The scheduler's loop
+    // catches and logs its own errors, so a broken IndexedDB can't take the UI down either.
+    services.GetRequiredService<SyncScheduler>().Start();
+}

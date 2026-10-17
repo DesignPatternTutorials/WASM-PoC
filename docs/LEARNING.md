@@ -1,7 +1,26 @@
 # Learning notes
 
 One section per phase: what was built, the key concepts, the gotchas, and things to try.
-Find every in-code lesson with `grep -rn "LEARN:" src`.
+Find every in-code lesson with `grep -rn "LEARN:" src`. For interview prep, see `docs/interview-notes.md`.
+
+Each section describes the app **as it was at the end of that phase**, so later phases change some of what it says.
+Where that matters, the section says so ("Later: …"). Each section's "Things to try" works against its own phase's
+code. To see the app at that point:
+
+| Phase | Commit | What you'll see |
+| --- | --- | --- |
+| 0 Scaffold | `fa9a03f` | Template home page only |
+| 1 Online-only CRUD | `11758b9` | Every page talks straight to DummyJSON; nothing works offline |
+| 2 IndexedDB local store | `3bb1e72` | Browsing and search work offline; writes still need the server |
+| 3 Outbox + sync engine | `68ade8d` | Writes work offline and sync later |
+| 4 Connectivity + UX | `cf864a4` | Banner, simulate-offline switch, toasts, Sync page |
+| 5 PWA app shell | `4300ec1` | The published build starts offline |
+| 6 Polish | this branch | bUnit tests, accessibility pass, these notes finished |
+
+```powershell
+git switch --detach 11758b9    # look around, run it
+git switch -                   # back to where you were
+```
 
 ## Phase 0: Scaffold
 
@@ -13,7 +32,7 @@ Find every in-code lesson with `grep -rn "LEARN:" src`.
   newer 10.0.x patch or feature band is fine but .NET 11 isn't picked up by accident.
 - `Directory.Build.props` holds the shared settings: target framework, nullable, warnings as errors,
   code-style enforcement from `.editorconfig`, and XML docs for the class libraries.
-- Five projects:
+- Five projects (later: two more test projects, `Infrastructure.Tests` in Phase 1 and `Client.Tests` in Phase 6):
 
   ```
   Client ──► Application ──► Domain
@@ -101,8 +120,10 @@ That has consequences:
 - There are no sockets to exhaust. `AddHttpClient` is used for central configuration and the handler pipeline,
   not for connection pooling.
 
-**One DI scope for the app's lifetime.** In WebAssembly, scoped and singleton behave the same. That's why
-`ProductService` can cache categories in a field for the whole session.
+**One DI scope for the app's lifetime.** In WebAssembly, components resolve services from one scope that lasts until
+the tab closes, so a scoped service behaves like a singleton *for components*. That's why `ProductService` can cache
+categories in a field for the whole session. (Later: Phase 3 found the catch. Code started from the root provider in
+`Program.cs` gets a *different* scoped instance, so shared services are registered as real singletons.)
 
 **Validation runs in the browser, twice over.** `ProductFormModel`'s data annotations drive the form's
 messages. `ProductDetails` enforces the same rules as a backstop, and `ProductFormModelTests` checks
@@ -110,7 +131,7 @@ the two agree. DummyJSON validates nothing, so nothing else protects the data.
 
 **Failures are classified once, at the edge.** `DummyJsonProductApiClient` turns status codes and exceptions
 into `ApiFailureKind`, and `ApiException.IsTransient` says whether a retry might help. Pages use the kind to choose
-a message. Phase 3's sync engine will use `IsTransient` to choose between retrying and marking an entry Failed.
+a message. The Phase 3 sync engine uses `IsTransient` to choose between retrying and marking an entry Failed.
 
 **Configuration is public.** `wwwroot/appsettings.json` is downloaded like any other static file. Put
 only non-secret values there (here, the API base address).
@@ -194,6 +215,7 @@ system eventually purges tombstones once the server confirms the delete and stop
   string, `decimal` becomes a double, and enums are stored by name so they read well in DevTools.
 - Everything is async. The `CancellationToken` only stops .NET waiting, and the JS work carries on.
 - `import()` returns an `IJSObjectReference` to the module. It's created lazily, once, and disposed with the repository.
+  (Later: Phase 3 moved it into `IndexedDbModule`, shared by the product and outbox stores.)
 - `IJSInProcessRuntime` (WASM-only) allows synchronous calls, but IndexedDB is asynchronous anyway.
 
 **IndexedDB essentials** (all in `indexedDb.js`):
@@ -207,7 +229,8 @@ system eventually purges tombstones once the server confirms the delete and stop
 
 **Concurrency without threads.** WASM is single-threaded, but every `await` lets other work run. `ProductService`
 takes a `SemaphoreSlim` around each read-merge-write so a background refresh can't write back a stale copy over a
-save. It only protects this tab; two tabs share the database but not the lock.
+save. It only protects this tab; two tabs share the database but not the lock. (Later: Phase 3 moved it into
+`LocalStoreLock`, shared with the sync engine.)
 
 ### Gotchas
 
@@ -218,7 +241,8 @@ save. It only protects this tab; two tabs share the database but not the lock.
   `ProductRecord[]` into one JS argument per record (array covariance). Wrap it as `[records]`.
 - **DummyJSON's PUT response has no `meta`.** If an update stored "no version", the next refresh would see a version
   where there was none and overwrite the edit. `UpdateAsync` keeps the previous version when the response has none
-  (there's a unit test for this).
+  (Later: from Phase 3, edits are local and the sync engine takes only the server id from responses, never the
+  version, for the same reason. `SyncServiceTests.SentUpdate_KeepsTheServerVersion` checks it.)
 - **Search differs offline.** DummyJSON's search rules aren't documented. The device search matches every word in
   title, brand, category or description, so results can differ a little. The badge says which source answered.
 - **The catalogue is refreshed whole.** That's fine for 194 products (~25 KB compressed). A large dataset would need
@@ -566,3 +590,80 @@ properties, used by reflection, aren't removed. The publish produces no trim war
 - **Stretch: offline product images.** Add a runtime cache for `cdn.dummyjson.com` thumbnails (cache-first, size-capped).
   The responses are cross-origin and *opaque*, which counts heavily against the storage quota. Think about how many to
   keep.
+
+## Phase 6: Polish
+
+### What was built
+
+- **`tests/OfflineCrud.Client.Tests`:** bUnit + NUnit + Moq component tests.
+  - Components: `SyncStateBadge`, `ConfirmDialog`, `Pager`, `ProductForm`.
+  - Layout: `ConnectivityBanner`, `NavMenu`.
+  - Pages: `ProductList`, `Sync`.
+  - The real `SyncScheduler` runs over a mocked engine, with a small fake for connectivity (`AppServices`).
+- **Accessibility pass** (below).
+- **`docs/interview-notes.md`:** short talking points on everything this project covers.
+- **These notes:** a commit per phase at the top, "Later: …" notes where a later phase changed something, and every
+  `// LEARN:` comment re-checked against the final code.
+
+### Accessibility pass
+
+Checked by reading every component and page, and by bUnit tests for the behaviour. There was no browser or screen
+reader in this environment, so no automated audit (axe or Lighthouse) was run. That's the first thing to do next.
+
+Changed:
+- **Dialogs move focus into themselves** (to Cancel, the safe choice) when they open, so Escape works at once and screen
+  readers announce them. They also gained `aria-describedby` pointing at the body text. *Tested.*
+- **A "Skip to main content" link**, visible on keyboard focus, jumps past the menu bar to `<main>`.
+- **Toasts:** each is its own live region (`role=status`; errors use `role=alert`). The container's extra `aria-live`
+  was removed, since it would announce every toast twice.
+- **The pager's** Previous/Next buttons are `disabled` at the ends, not just styled that way, so the keyboard can't
+  "press" them. *Tested.*
+
+Confirmed already right (several by tests):
+- Form errors set `aria-invalid="true"` on the input (Blazor does this) as well as the visual `is-invalid`.
+- `NavLink` sets `aria-current="page"` on the active link.
+- The pager marks the current page with `aria-current`.
+- Icon-only buttons have visually hidden text.
+- Decorative icons are `aria-hidden`.
+- List thumbnails have empty `alt` (the title sits next to them); the detail image has the title as `alt`.
+- Tables use `<th scope>`.
+- The simulate-offline switch has a `<label>`.
+- `FocusOnNavigate` moves focus to each page's `h1` after navigation.
+- Status lines are `role=status` live regions.
+
+Known gaps:
+- **Focus isn't trapped inside dialogs.** Tab can reach the page behind; making the rest of the page `inert` would fix
+  it. Focus also isn't returned to the triggering button on close.
+- **Colour contrast hasn't been measured.** The brand colour (`#4f46e5`) on white is about 6.3:1, but the subtle badge
+  and banner colours in both themes should be checked with a tool.
+- **The status lines on the products page update often** during refreshes, which may be chatty for screen-reader users.
+
+### Key concepts
+
+**bUnit renders components without a browser.** It provides a renderer, a DI container and a fake `IJSRuntime`.
+`JSRuntimeMode.Loose` lets components that import JS modules render, and calls such as `FocusAsync` can be verified
+(`ConfirmDialogTests.Opening_MovesFocusToCancel`). Events are raised on elements (`Click()`, `Change()`,
+`KeyDown()`, `Submit()`), and `WaitForAssertion` handles async rendering, such as a page that renders local data first
+and re-renders when a refresh finishes.
+
+**Test the real thing where it's cheap.** The layout tests use the real `SyncScheduler` and drive it through its mocked
+`ISyncService`, so the nav badge test covers the actual event wiring (`Changed` → `InvokeAsync(StateHasChanged)`), not
+a stand-in.
+
+**Fakes vs mocks.** `IConnectivityService` has an event and a default interface member, both awkward to mock. A
+ten-line fake (`FakeConnectivityService`) with `SetStatus` is clearer than Moq setups.
+
+### Gotchas
+
+- **bUnit 2 renamed things.** `TestContext` is now `BunitContext`, and `RenderComponent<T>` is now `Render<T>`. Most
+  examples online are for bUnit 1.
+- **Disposing the context.** NUnit's analyzer insists that fields holding disposables are disposed in `[TearDown]`.
+  `ComponentTestBase` does it for the bUnit context; tests that start the scheduler dispose it too, stopping its loop.
+
+### Things to try
+
+- Run only the component tests: `dotnet test tests/OfflineCrud.Client.Tests`.
+- Break `ConfirmDialog`'s focus code (comment out `FocusAsync`) and watch `Opening_MovesFocusToCancel` fail.
+- Tab from the address bar on any page: the first stop is "Skip to main content".
+- Run Lighthouse (DevTools → Lighthouse → Accessibility + PWA) against the published build from
+  `publish-and-serve.ps1`, and fix what it finds.

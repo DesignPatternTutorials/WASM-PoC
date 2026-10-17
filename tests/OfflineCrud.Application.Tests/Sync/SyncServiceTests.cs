@@ -80,6 +80,26 @@ public class SyncServiceTests
     }
 
     [Test]
+    public async Task SentUpdate_KeepsTheServerVersion()
+    {
+        // DummyJSON's PUT response has no version. If sending an update cleared ServerVersion, the next refresh would
+        // treat the server's (unchanged, edit-less) copy as new and overwrite the edit.
+        Product product = SeedSynced(serverId: 4);
+        OutboxEntry update = SeedEntry(OutboxOperation.Update, product, V2, Now.AddSeconds(-1));
+        _api.Setup(api => api.UpdateAsync(4, V2, update.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServerProduct(4, V2, null, null, Version: null));
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        Product after = _store.Product(product.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(after.ServerVersion, Is.EqualTo("v1"));
+            Assert.That(after.ShouldAcceptServerCopy("v1"), Is.False, "a refresh with the same version leaves the edit alone");
+        });
+    }
+
+    [Test]
     public async Task TemporaryFailure_SchedulesARetryWithBackoff_AndHoldsBackLaterEntriesForThatProduct()
     {
         Product product = SeedSynced(serverId: 4);
