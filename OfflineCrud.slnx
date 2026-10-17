@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OfflineCrud.Application/OfflineCrud.Application.csproj" />
+    <Project Path="src/OfflineCrud.Client/OfflineCrud.Client.csproj" />
+    <Project Path="src/OfflineCrud.Domain/OfflineCrud.Domain.csproj" />
+    <Project Path="src/OfflineCrud.Infrastructure/OfflineCrud.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OfflineCrud.Application.Tests/OfflineCrud.Application.Tests.csproj" />
+  </Folder>
+</Solution>

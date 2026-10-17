@@ -1,0 +1,5 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The innermost layer: no project or package references, ever. -->
+
+</Project>
