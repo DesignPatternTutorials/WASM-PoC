@@ -1,0 +1,387 @@
+/* ==========================================================================
+   Theme: Bootstrap 5.3 skinned with CSS variables (no Sass build step).
+   Light and dark values follow data-bs-theme, which index.html sets from the OS preference.
+   ========================================================================== */
+
+:root,
+[data-bs-theme="light"] {
+    --app-brand: #4f46e5;
+    --app-brand-rgb: 79, 70, 229;
+    --app-brand-hover: #4338ca;
+    --app-accent: #0d9488;
+    --app-hero-from: #312e81;
+    --app-hero-to: #0f766e;
+
+    --bs-body-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --bs-body-bg: #f6f7fb;
+    --bs-primary: var(--app-brand);
+    --bs-primary-rgb: var(--app-brand-rgb);
+    --bs-primary-bg-subtle: #eef2ff;
+    --bs-primary-border-subtle: #c7d2fe;
+    --bs-primary-text-emphasis: #3730a3;
+    --bs-link-color: var(--app-brand);
+    --bs-link-color-rgb: var(--app-brand-rgb);
+    --bs-link-hover-color: var(--app-brand-hover);
+    --bs-link-hover-color-rgb: 67, 56, 202;
+    --bs-focus-ring-color: rgba(var(--app-brand-rgb), 0.3);
+    --bs-border-radius: 0.6rem;
+    --bs-border-radius-lg: 0.9rem;
+}
+
+[data-bs-theme="dark"] {
+    --app-hero-from: #1e1b4b;
+    --app-hero-to: #134e4a;
+
+    --bs-body-bg: #0f1117;
+    --bs-secondary-bg: #171a23;
+    --bs-tertiary-bg: #141720;
+    --bs-primary-bg-subtle: #1e1b4b;
+    --bs-primary-border-subtle: #3730a3;
+    --bs-primary-text-emphasis: #c7d2fe;
+    --bs-link-color: #a5b4fc;
+    --bs-link-color-rgb: 165, 180, 252;
+    --bs-link-hover-color: #c7d2fe;
+    --bs-link-hover-color-rgb: 199, 210, 254;
+}
+
+[data-bs-theme="dark"] .card {
+    --bs-card-bg: #171a23;
+}
+
+/* Bootstrap compiles component colours into per-component variables, so the brand colour is re-applied here. */
+.btn-primary {
+    --bs-btn-bg: var(--app-brand);
+    --bs-btn-border-color: var(--app-brand);
+    --bs-btn-hover-bg: var(--app-brand-hover);
+    --bs-btn-hover-border-color: var(--app-brand-hover);
+    --bs-btn-active-bg: var(--app-brand-hover);
+    --bs-btn-active-border-color: var(--app-brand-hover);
+    --bs-btn-disabled-bg: var(--app-brand);
+    --bs-btn-disabled-border-color: var(--app-brand);
+    --bs-btn-focus-shadow-rgb: var(--app-brand-rgb);
+}
+
+.btn-outline-primary {
+    --bs-btn-color: var(--bs-link-color);
+    --bs-btn-border-color: var(--bs-link-color);
+    --bs-btn-hover-bg: var(--app-brand);
+    --bs-btn-hover-border-color: var(--app-brand);
+    --bs-btn-active-bg: var(--app-brand-hover);
+    --bs-btn-active-border-color: var(--app-brand-hover);
+    --bs-btn-focus-shadow-rgb: var(--app-brand-rgb);
+}
+
+.pagination {
+    --bs-pagination-color: var(--bs-link-color);
+    --bs-pagination-hover-color: var(--bs-link-hover-color);
+    --bs-pagination-active-bg: var(--app-brand);
+    --bs-pagination-active-border-color: var(--app-brand);
+    --bs-pagination-focus-box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+}
+
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+    border-color: rgba(var(--app-brand-rgb), 0.6);
+    box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+}
+
+.form-check-input:checked {
+    background-color: var(--app-brand);
+    border-color: var(--app-brand);
+}
+
+/* FocusOnNavigate moves focus to the page's h1, and the skip link moves it to <main>. Both are programmatic focus targets,
+   not controls, so no focus ring. Real controls keep Bootstrap's visible focus styles. */
+h1:focus,
+main:focus {
+    outline: none;
+}
+
+.skip-link {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 1100;
+    padding: 0.5rem 1rem;
+    border-radius: var(--bs-border-radius);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-link-color);
+    box-shadow: 0 0 0 0.25rem var(--bs-focus-ring-color);
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+
+.app-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-navbar {
+    background: linear-gradient(90deg, var(--app-hero-from), #3730a3);
+}
+
+.app-navbar .navbar-brand {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.app-navbar .nav-link.active {
+    color: #fff;
+    font-weight: 600;
+}
+
+.connectivity-banner-offline {
+    background-color: var(--bs-warning-bg-subtle);
+    color: var(--bs-warning-text-emphasis);
+    border-bottom: 1px solid var(--bs-warning-border-subtle);
+}
+
+.connectivity-banner-simulated {
+    background-color: #5b21b6;
+    color: #fff;
+}
+
+.update-banner {
+    background-color: var(--app-accent);
+    color: #fff;
+}
+
+.app-navbar .form-check-input:not(:checked) {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.toast-container {
+    z-index: 1090;
+}
+
+.app-main {
+    flex: 1 0 auto;
+    padding-block: 2rem;
+}
+
+.app-footer {
+    border-top: 1px solid var(--bs-border-color-translucent);
+    color: var(--bs-secondary-color);
+    font-size: 0.875rem;
+}
+
+.page-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 600;
+}
+
+/* ==========================================================================
+   Components
+   ========================================================================== */
+
+.hero {
+    background: linear-gradient(135deg, var(--app-hero-from), var(--app-hero-to));
+    color: #fff;
+    border-radius: var(--bs-border-radius-lg);
+    padding: clamp(2rem, 6vw, 4.5rem) clamp(1.5rem, 5vw, 4rem);
+}
+
+.hero .lead {
+    color: rgba(255, 255, 255, 0.85);
+    max-width: 44rem;
+}
+
+.feature-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 0.75rem;
+    font-size: 1.35rem;
+    background-color: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+}
+
+.card {
+    border: 1px solid var(--bs-border-color-translucent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.product-thumb {
+    width: 3rem;
+    height: 3rem;
+    object-fit: cover;
+    border-radius: 0.5rem;
+    background-color: var(--bs-tertiary-bg);
+}
+
+.product-thumb-lg {
+    width: 100%;
+    max-width: 20rem;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: var(--bs-border-radius-lg);
+    background-color: var(--bs-tertiary-bg);
+}
+
+.table > :not(caption) > * > * {
+    padding-block: 0.75rem;
+}
+
+.table-products td {
+    vertical-align: middle;
+}
+
+/* The delete confirmation is rendered by Blazor, so Bootstrap's modal JavaScript isn't needed. */
+.modal.app-modal {
+    display: block;
+}
+
+.modal-backdrop.app-modal-backdrop {
+    opacity: 0.5;
+}
+
+/* Architecture diagram on the About page: concentric layers, innermost in the middle. */
+.layer {
+    border: 2px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    padding: 1rem;
+    padding-top: 2.25rem;
+    position: relative;
+}
+
+.layer > .layer-label {
+    position: absolute;
+    top: 0.6rem;
+    left: 1rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.layer-outer {
+    border-style: dashed;
+    background-color: var(--bs-tertiary-bg);
+}
+
+.layer-client,
+.layer-infrastructure {
+    background-color: var(--bs-body-bg);
+}
+
+.layer-application {
+    background-color: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary-border-subtle);
+}
+
+.layer-domain {
+    background-color: var(--app-brand);
+    border-color: var(--app-brand);
+    color: #fff;
+}
+
+.flow-step {
+    height: 100%;
+}
+
+.flow-step .step-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background-color: var(--app-brand);
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+/* ==========================================================================
+   Blazor form validation, mapped to Bootstrap's look by BootstrapFieldCssClassProvider.
+   ========================================================================== */
+
+.validation-message {
+    color: var(--bs-form-invalid-color);
+    font-size: 0.875em;
+    margin-top: 0.25rem;
+}
+
+/* ==========================================================================
+   Blazor template plumbing: start-up progress and error UI
+   ========================================================================== */
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: 0.75rem;
+        top: 0.5rem;
+    }
+
+.blazor-error-boundary {
+    background: #b32121;
+    padding: 1rem 1rem 1rem 1.25rem;
+    color: white;
+}
+
+    .blazor-error-boundary::after {
+        content: "An error has occurred."
+    }
+
+.loading-progress {
+    position: absolute;
+    display: block;
+    width: 8rem;
+    height: 8rem;
+    inset: 20vh 0 auto 0;
+    margin: 0 auto 0 auto;
+}
+
+    .loading-progress circle {
+        fill: none;
+        stroke: var(--bs-border-color);
+        stroke-width: 0.6rem;
+        transform-origin: 50% 50%;
+        transform: rotate(-90deg);
+    }
+
+        .loading-progress circle:last-child {
+            stroke: var(--app-brand);
+            stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+            transition: stroke-dasharray 0.05s ease-in-out;
+        }
+
+.loading-progress-text {
+    position: absolute;
+    text-align: center;
+    font-weight: bold;
+    inset: calc(20vh + 3.25rem) 0 auto 0.2rem;
+}
+
+    .loading-progress-text:after {
+        content: var(--blazor-load-percentage-text, "Loading");
+    }

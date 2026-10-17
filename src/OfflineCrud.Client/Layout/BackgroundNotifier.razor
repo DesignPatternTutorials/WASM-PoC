@@ -1,0 +1,60 @@
+@* Turns things that happen in the background (sync runs, connectivity changes) into toasts. Renders nothing itself. *@
+@implements IDisposable
+@inject SyncScheduler Scheduler
+@inject IConnectivityService Connectivity
+@inject ToastService Toasts
+
+@code {
+    private ConnectivityStatus _lastStatus;
+
+    protected override void OnInitialized()
+    {
+        _lastStatus = Connectivity.Status;
+        Scheduler.RunCompleted += OnRunCompleted;
+        Connectivity.Changed += OnConnectivityChanged;
+    }
+
+    public void Dispose()
+    {
+        Scheduler.RunCompleted -= OnRunCompleted;
+        Connectivity.Changed -= OnConnectivityChanged;
+    }
+
+    private void OnRunCompleted(SyncRunResult result)
+    {
+        // Only report runs that did something, or the 30-second timer would toast every half minute.
+        if (result.Sent > 0)
+        {
+            Toasts.Show($"Synced {Plural(result.Sent, "change")} to DummyJSON.", ToastKind.Success);
+        }
+
+        if (result.Failed > 0)
+        {
+            Toasts.Show($"{Plural(result.Failed, "change")} couldn't be synced. See the Sync page for why.", ToastKind.Error);
+        }
+    }
+
+    private void OnConnectivityChanged()
+    {
+        ConnectivityStatus status = Connectivity.Status;
+        if (status == _lastStatus)
+        {
+            return;
+        }
+
+        if (status == ConnectivityStatus.Online)
+        {
+            Toasts.Show("Back online. Syncing your changes…", ToastKind.Success);
+        }
+        else if (_lastStatus == ConnectivityStatus.Online)
+        {
+            Toasts.Show(status == ConnectivityStatus.SimulatedOffline
+                ? "Simulating offline. Changes will be saved on this device only."
+                : "Connection lost. Changes will be saved on this device and synced later.", ToastKind.Warning);
+        }
+
+        _lastStatus = status;
+    }
+
+    private static string Plural(int count, string noun) => count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+}

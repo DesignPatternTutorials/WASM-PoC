@@ -1,0 +1,46 @@
+@* Renders the toasts from ToastService, Bootstrap-styled, without Bootstrap's JavaScript. *@
+@implements IDisposable
+@inject ToastService Toasts
+
+@* Accessibility: each toast is its own live region. role="status" is announced politely; errors use role="alert" so they
+   interrupt. (A live region on the container as well would announce every toast twice.) *@
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    @foreach (Toast toast in Toasts.Toasts)
+    {
+        <div @key="toast.Id" class="toast show align-items-center border-0 @CssClass(toast.Kind)"
+             role="@(toast.Kind == ToastKind.Error ? "alert" : "status")">
+            <div class="d-flex">
+                <div class="toast-body d-flex gap-2">
+                    <i class="bi @Icon(toast.Kind)" aria-hidden="true"></i>
+                    <span>@toast.Message</span>
+                </div>
+                <button type="button" class="btn-close me-2 m-auto @(toast.Kind is ToastKind.Info or ToastKind.Warning ? null : "btn-close-white")"
+                        aria-label="Dismiss" @onclick="() => Toasts.Dismiss(toast.Id)"></button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Toasts.Changed += OnChanged;
+
+    public void Dispose() => Toasts.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string CssClass(ToastKind kind) => kind switch
+    {
+        ToastKind.Success => "text-bg-success",
+        ToastKind.Warning => "text-bg-warning",
+        ToastKind.Error => "text-bg-danger",
+        _ => "text-bg-light",
+    };
+
+    private static string Icon(ToastKind kind) => kind switch
+    {
+        ToastKind.Success => "bi-check-circle",
+        ToastKind.Warning => "bi-exclamation-triangle",
+        ToastKind.Error => "bi-x-octagon",
+        _ => "bi-info-circle",
+    };
+}

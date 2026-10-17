@@ -1,0 +1,70 @@
+@* A one-line summary of the outbox, kept live by subscribing to the scheduler. *@
+@implements IDisposable
+@inject SyncScheduler Scheduler
+@inject TimeProvider TimeProvider
+
+<div class="d-flex flex-wrap align-items-center gap-2 small mb-3 @(FailedCount > 0 ? "text-danger-emphasis" : "text-body-secondary")"
+     role="status" aria-live="polite">
+    @if (Scheduler.IsRunning)
+    {
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Syncing changes…</span>
+    }
+    else if (Scheduler.Outbox.Count == 0)
+    {
+        <i class="bi bi-cloud-check" aria-hidden="true"></i>
+        <span>All changes synced@(LastRunText is null ? "." : $" (checked {LastRunText}).")</span>
+    }
+    else
+    {
+        <i class="bi @(FailedCount > 0 ? "bi-exclamation-triangle" : "bi-cloud-arrow-up")" aria-hidden="true"></i>
+        <span>
+            @Plural(Scheduler.Outbox.Count, "change") waiting to sync@(FailedCount > 0 ? $", {FailedCount} failed" : "").
+            @if (NextRetry is { } next)
+            {
+                <text>Next retry @Formatting.TimeUntil(next, TimeProvider.GetUtcNow()).</text>
+            }
+            @if (LastErrorText is { } error)
+            {
+                <span class="d-block">Last error: @error</span>
+            }
+        </span>
+    }
+    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" disabled="@Scheduler.IsRunning" @onclick="Scheduler.RequestSync">
+        Sync now
+    </button>
+</div>
+
+@code {
+    private int FailedCount => Scheduler.Outbox.Count(entry => entry.Status == OutboxStatus.Failed);
+
+    private DateTimeOffset? NextRetry => Scheduler.Outbox
+        .Where(entry => entry.Status == OutboxStatus.Pending && entry.NextAttemptAt > TimeProvider.GetUtcNow())
+        .Select(entry => entry.NextAttemptAt)
+        .Min();
+
+    private string? LastErrorText => Scheduler.Outbox
+        .Where(entry => entry.LastError is not null)
+        .Select(entry => entry.LastError)
+        .LastOrDefault();
+
+    private string? LastRunText =>
+        Scheduler.LastRunAt is { } last ? Formatting.TimeAgo(last, TimeProvider.GetUtcNow()) : null;
+
+    protected override void OnInitialized()
+    {
+        Scheduler.Changed += OnSchedulerChanged;
+    }
+
+    public void Dispose()
+    {
+        Scheduler.Changed -= OnSchedulerChanged;
+    }
+
+    // LEARN: The scheduler raises Changed from its own loop, not from a UI event, so Blazor doesn't know to re-render.
+    // InvokeAsync(StateHasChanged) asks the renderer to do it. In WebAssembly there's only one thread, so this is about
+    // scheduling rather than thread safety, but the same code is required (and thread-safe) in Blazor Server.
+    private void OnSchedulerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string Plural(int count, string noun) => count == 1 ? $"1 {noun}" : $"{count} {noun}s";
+}

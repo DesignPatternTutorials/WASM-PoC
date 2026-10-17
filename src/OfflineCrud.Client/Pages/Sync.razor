@@ -1,0 +1,303 @@
+@page "/sync"
+@inherits CancellableComponentBase
+@inject ISyncService SyncService
+@inject IProductService ProductService
+@inject SyncScheduler Scheduler
+@inject IConnectivityService Connectivity
+@inject ToastService Toasts
+@inject TimeProvider TimeProvider
+
+<PageTitle>Sync · Offline CRUD</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Sync</h1>
+        <p class="text-body-secondary mb-0">Changes saved on this device that DummyJSON hasn't confirmed yet.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-primary" disabled="@(Scheduler.IsRunning || CertainlyOffline)"
+                @onclick="Scheduler.RequestSync">
+            @if (Scheduler.IsRunning)
+            {
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                <span>Syncing…</span>
+            }
+            else
+            {
+                <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>
+                <span>Sync now</span>
+            }
+        </button>
+        <button type="button" class="btn btn-outline-danger" @onclick="() => _confirmingClear = true">
+            <i class="bi bi-trash3 me-1" aria-hidden="true"></i>Clear local data
+        </button>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+            <div class="small text-body-secondary">Connection</div>
+            <div class="fs-5 fw-semibold">@ConnectionText</div>
+        </div></div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+            <div class="small text-body-secondary">Waiting to sync</div>
+            <div class="fs-5 fw-semibold">@(_items?.Count(item => item.Entry.Status != OutboxStatus.Failed) ?? 0)</div>
+        </div></div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+            <div class="small text-body-secondary">Failed</div>
+            <div class="fs-5 fw-semibold @(FailedCount > 0 ? "text-danger" : null)">@FailedCount</div>
+        </div></div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100"><div class="card-body">
+            <div class="small text-body-secondary">Last sync run</div>
+            <div class="fs-5 fw-semibold">@LastRunText</div>
+            @if (Scheduler.LastResult is { } last)
+            {
+                <div class="small text-body-secondary">@last.Sent sent · @last.Retrying retrying · @last.Failed failed</div>
+            }
+        </div></div>
+    </div>
+</div>
+
+@if (Scheduler.PausedOffline)
+{
+    <div class="alert alert-warning small" role="status">
+        <i class="bi bi-pause-circle me-1" aria-hidden="true"></i>
+        Syncing is paused while you're offline. Nothing is sent, so offline time doesn't use up retry attempts. It resumes
+        as soon as the connection is back.
+    </div>
+}
+
+@if (Scheduler.LastError is { } runError)
+{
+    <div class="alert alert-danger small" role="alert">
+        The last sync run stopped with an unexpected error: @runError.Message
+    </div>
+}
+
+@if (_items is null)
+{
+    <LoadingIndicator Text="Loading the outbox…" />
+}
+else if (_items.Count == 0)
+{
+    <div class="text-center py-5 text-body-secondary">
+        <i class="bi bi-cloud-check display-5 d-block mb-3" aria-hidden="true"></i>
+        <p class="mb-1">Nothing waiting. Every change on this device has reached DummyJSON.</p>
+        <p class="small">Try switching on "Simulate offline" and editing a product to see changes queue up here.</p>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col" class="ps-3">Change</th>
+                        <th scope="col">Status</th>
+                        <th scope="col" class="d-none d-md-table-cell">Queued</th>
+                        <th scope="col" class="d-none d-lg-table-cell text-end">Attempts</th>
+                        <th scope="col" class="pe-3 text-end"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (OutboxItem item in _items)
+                    {
+                        OutboxEntry entry = item.Entry;
+                        <tr @key="entry.Id">
+                            <td class="ps-3">
+                                <div class="fw-semibold">
+                                    <i class="bi @OperationIcon(entry.Operation) me-1" aria-hidden="true"></i>@entry.Operation
+                                    <span class="fw-normal">“@item.ProductTitle”</span>
+                                </div>
+                                @if (entry.LastError is not null)
+                                {
+                                    <div class="small @(entry.Status == OutboxStatus.Failed ? "text-danger-emphasis" : "text-body-secondary")">@entry.LastError</div>
+                                }
+                                <div class="small text-body-secondary font-monospace" title="Sent as the Idempotency-Key header">key @entry.Id</div>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill @StatusClass(entry.Status)">@entry.Status</span>
+                                @if (entry.Status == OutboxStatus.Pending && entry.NextAttemptAt is { } next && next > TimeProvider.GetUtcNow())
+                                {
+                                    <div class="small text-body-secondary">retry @Formatting.TimeUntil(next, TimeProvider.GetUtcNow())</div>
+                                }
+                            </td>
+                            <td class="d-none d-md-table-cell small text-body-secondary">@Formatting.TimeAgo(entry.CreatedAt, TimeProvider.GetUtcNow())</td>
+                            <td class="d-none d-lg-table-cell text-end">@entry.Attempts</td>
+                            <td class="pe-3 text-end text-nowrap">
+                                @if (entry.Status == OutboxStatus.Failed)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => RetryAsync(item)">
+                                        <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Retry
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => _pendingDiscard = item">
+                                        <i class="bi bi-x-lg me-1" aria-hidden="true"></i>Discard
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<ConfirmDialog IsOpen="_pendingDiscard is not null" Title="Discard this change?" ConfirmText="Discard"
+               ConfirmButtonClass="btn-danger" IsBusy="_busy" OnConfirm="DiscardAsync" OnCancel="() => _pendingDiscard = null">
+    @if (_pendingDiscard?.Entry.Operation == OutboxOperation.Create)
+    {
+        <p>“@_pendingDiscard.ProductTitle” never reached the server. Discarding the create removes it from this device.</p>
+    }
+    else if (_pendingDiscard?.Entry.Operation == OutboxOperation.Delete)
+    {
+        <p>The product comes back, and the server's copy replaces the one on this device.</p>
+    }
+    else
+    {
+        <p>Your edit to “@_pendingDiscard?.ProductTitle” is thrown away, and the server's copy replaces it (if the server has one).</p>
+    }
+</ConfirmDialog>
+
+<ConfirmDialog IsOpen="_confirmingClear" Title="Clear local data?" ConfirmText="Clear everything"
+               ConfirmButtonClass="btn-danger" IsBusy="_busy" OnConfirm="ClearAsync" OnCancel="() => _confirmingClear = false">
+    <p>This deletes every product saved on this device and <strong>every change that hasn't synced</strong>.</p>
+    <p class="mb-0 small text-body-secondary">The catalogue is downloaded again the next time you open Products while online.</p>
+</ConfirmDialog>
+
+@code {
+    private IReadOnlyList<OutboxItem>? _items;
+    private OutboxItem? _pendingDiscard;
+    private bool _confirmingClear;
+    private bool _busy;
+
+    private int FailedCount => _items?.Count(item => item.Entry.Status == OutboxStatus.Failed) ?? 0;
+
+    // "Unreachable" still allows Sync now: trying is the only way to find out whether the server is back.
+    private bool CertainlyOffline => Connectivity.Status is ConnectivityStatus.Offline or ConnectivityStatus.SimulatedOffline;
+
+    private string ConnectionText => Connectivity.Status switch
+    {
+        ConnectivityStatus.Online => "Online",
+        ConnectivityStatus.Offline => "Offline",
+        ConnectivityStatus.SimulatedOffline => "Simulated offline",
+        _ => "Server unreachable",
+    };
+
+    private string LastRunText =>
+        Scheduler.LastRunAt is { } last ? Formatting.TimeAgo(last, TimeProvider.GetUtcNow()) : "not yet";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Scheduler.Changed += OnChanged;
+        Connectivity.Changed += OnChanged;
+        await LoadAsync();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Scheduler.Changed -= OnChanged;
+            Connectivity.Changed -= OnChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private void OnChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await LoadAsync();
+                StateHasChanged();
+            }
+            catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+            {
+            }
+        });
+    }
+
+    private async Task LoadAsync()
+    {
+        _items = await SyncService.GetOutboxItemsAsync(ComponentToken);
+    }
+
+    private async Task RetryAsync(OutboxItem item)
+    {
+        await SyncService.RetryAsync(item.Entry.Id, ComponentToken);
+        Toasts.Show($"Retrying the {item.Entry.Operation.ToString().ToLowerInvariant()} of “{item.ProductTitle}”.");
+        Scheduler.RequestSync();
+        await LoadAsync();
+    }
+
+    private async Task DiscardAsync()
+    {
+        if (_pendingDiscard is not { } item)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            Guid productId = await SyncService.DiscardAsync(item.Entry.Id, ComponentToken);
+            _pendingDiscard = null;
+
+            // An update or delete was thrown away: fetch the server's copy now rather than waiting for the next refresh.
+            if (item.Entry.Operation != OutboxOperation.Create)
+            {
+                await ProductService.RefreshAsync(productId, ComponentToken);
+            }
+
+            Toasts.Show($"Discarded the {item.Entry.Operation.ToString().ToLowerInvariant()} of “{item.ProductTitle}”.", ToastKind.Info);
+            Scheduler.RequestSync();
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        _busy = true;
+        try
+        {
+            await SyncService.ClearLocalDataAsync(ComponentToken);
+            _confirmingClear = false;
+            Toasts.Show("Cleared everything stored on this device.", ToastKind.Warning);
+            Scheduler.RequestSync();
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string StatusClass(OutboxStatus status) => status switch
+    {
+        OutboxStatus.Failed => "bg-danger-subtle text-danger-emphasis",
+        OutboxStatus.InFlight => "bg-primary-subtle text-primary-emphasis",
+        _ => "bg-warning-subtle text-warning-emphasis",
+    };
+
+    private static string OperationIcon(OutboxOperation operation) => operation switch
+    {
+        OutboxOperation.Create => "bi-plus-circle",
+        OutboxOperation.Update => "bi-pencil",
+        _ => "bi-trash",
+    };
+}

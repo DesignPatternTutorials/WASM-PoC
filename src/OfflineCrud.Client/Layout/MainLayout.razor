@@ -1,0 +1,26 @@
+﻿@inherits LayoutComponentBase
+
+<div class="app-shell">
+    @* Accessibility: lets keyboard users jump past the menu bar. Hidden until it receives focus. *@
+    <a class="visually-hidden-focusable skip-link" href="#main-content">Skip to main content</a>
+
+    <NavMenu />
+    <UpdateBanner />
+    <ConnectivityBanner />
+
+    <main class="app-main" id="main-content" tabindex="-1">
+        <div class="container">
+            @Body
+        </div>
+    </main>
+
+    <footer class="app-footer py-3">
+        <div class="container d-flex flex-wrap justify-content-between gap-2">
+            <span>Offline CRUD: a Blazor WebAssembly learning project</span>
+            <span>Data from <a href="https://dummyjson.com" target="_blank" rel="noopener">DummyJSON</a></span>
+        </div>
+    </footer>
+</div>
+
+<ToastHost />
+<BackgroundNotifier />

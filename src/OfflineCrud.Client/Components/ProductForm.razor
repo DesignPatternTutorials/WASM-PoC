@@ -1,0 +1,128 @@
+@* The create/edit form. Validation runs in the browser from the data annotations on ProductFormModel. *@
+
+<EditForm EditContext="_editContext" OnValidSubmit="SubmitAsync">
+    <DataAnnotationsValidator />
+
+    @* A disabled fieldset disables every input inside it, so nothing can change while a save is in flight. *@
+    <fieldset disabled="@IsSaving">
+        <div class="row g-3">
+            <div class="col-12">
+                <label for="title" class="form-label">Title</label>
+                <InputText id="title" class="form-control" @bind-Value="Model.Title" />
+                <ValidationMessage For="() => Model.Title" />
+            </div>
+
+            <div class="col-md-6">
+                <label for="category" class="form-label">Category</label>
+                <InputSelect id="category" class="form-select" @bind-Value="Model.Category">
+                    <option value="">Choose…</option>
+                    @foreach (string category in CategoryOptions)
+                    {
+                        <option value="@category">@Formatting.Category(category)</option>
+                    }
+                </InputSelect>
+                <ValidationMessage For="() => Model.Category" />
+            </div>
+
+            <div class="col-md-6">
+                <label for="brand" class="form-label">Brand <span class="text-body-secondary">(optional)</span></label>
+                <InputText id="brand" class="form-control" @bind-Value="Model.Brand" />
+                <ValidationMessage For="() => Model.Brand" />
+            </div>
+
+            <div class="col-12">
+                <label for="description" class="form-label">Description</label>
+                <InputTextArea id="description" class="form-control" rows="4" @bind-Value="Model.Description" />
+                <ValidationMessage For="() => Model.Description" />
+            </div>
+
+            <div class="col-sm-4">
+                <label for="price" class="form-label">Price (USD)</label>
+                <div class="input-group has-validation">
+                    <span class="input-group-text">$</span>
+                    <InputNumber id="price" class="form-control" step="0.01" min="0" @bind-Value="Model.Price" />
+                </div>
+                <ValidationMessage For="() => Model.Price" />
+            </div>
+
+            <div class="col-sm-4">
+                <label for="discount" class="form-label">Discount</label>
+                <div class="input-group has-validation">
+                    <InputNumber id="discount" class="form-control" step="0.01" min="0" max="100"
+                                 @bind-Value="Model.DiscountPercentage" />
+                    <span class="input-group-text">%</span>
+                </div>
+                <ValidationMessage For="() => Model.DiscountPercentage" />
+            </div>
+
+            <div class="col-sm-4">
+                <label for="stock" class="form-label">Stock</label>
+                <InputNumber id="stock" class="form-control" min="0" @bind-Value="Model.Stock" />
+                <ValidationMessage For="() => Model.Stock" />
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 mt-4">
+            <button type="submit" class="btn btn-primary">
+                @if (IsSaving)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                    <span>Saving…</span>
+                }
+                else
+                {
+                    <i class="bi bi-check-lg me-1" aria-hidden="true"></i>
+                    <span>@SubmitText</span>
+                }
+            </button>
+            <a href="@CancelHref" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </fieldset>
+</EditForm>
+
+@code {
+    private EditContext _editContext = default!;
+    private ProductFormModel? _boundModel;
+
+    /// <summary>The values being edited.</summary>
+    [Parameter, EditorRequired]
+    public ProductFormModel Model { get; set; } = default!;
+
+    /// <summary>The category slugs to offer.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Categories { get; set; } = [];
+
+    /// <summary>Disables the form and shows a spinner on the submit button.</summary>
+    [Parameter]
+    public bool IsSaving { get; set; }
+
+    /// <summary>Label of the submit button.</summary>
+    [Parameter]
+    public string SubmitText { get; set; } = "Save";
+
+    /// <summary>Where the Cancel button goes.</summary>
+    [Parameter]
+    public string CancelHref { get; set; } = "products";
+
+    /// <summary>Invoked with the model once all validation rules pass.</summary>
+    [Parameter]
+    public EventCallback<ProductFormModel> OnValidSubmit { get; set; }
+
+    // The current category stays selectable even if it isn't in the list (or the list failed to load).
+    private IEnumerable<string> CategoryOptions =>
+        string.IsNullOrEmpty(Model.Category) || Categories.Contains(Model.Category)
+            ? Categories
+            : Categories.Append(Model.Category);
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Model, _boundModel))
+        {
+            _boundModel = Model;
+            _editContext = new EditContext(Model);
+            _editContext.SetFieldCssClassProvider(new BootstrapFieldCssClassProvider());
+        }
+    }
+
+    private Task SubmitAsync() => OnValidSubmit.InvokeAsync(Model);
+}

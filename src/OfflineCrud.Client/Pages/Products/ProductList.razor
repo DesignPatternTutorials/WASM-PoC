@@ -1,0 +1,395 @@
+@page "/products"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+@inject NavigationManager Navigation
+@inject SyncScheduler Scheduler
+@inject IConnectivityService Connectivity
+@inject ToastService Toasts
+
+<PageTitle>Products · Offline CRUD</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Products</h1>
+        <p class="text-body-secondary mb-0">@Summary</p>
+    </div>
+    <a href="products/new" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New product
+    </a>
+</div>
+
+@* Blazor calls preventDefault on a form's submit event when @onsubmit is handled, so the page doesn't reload. *@
+<form class="mb-3" role="search" @onsubmit="Search">
+    <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+        <input type="search" class="form-control" placeholder="Search by title, brand or category"
+               aria-label="Search products" @bind="_searchText" />
+        <button class="btn btn-primary" type="submit">Search</button>
+        @if (IsSearching)
+        {
+            <button class="btn btn-outline-secondary" type="button" @onclick="ClearSearch">Clear</button>
+        }
+    </div>
+</form>
+
+@if (IsSearching)
+{
+    @if (_searchResult is { } search)
+    {
+        <div class="small mb-3" role="status">
+            @if (search.Source == ProductDataSource.Server)
+            {
+                <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis">
+                    <i class="bi bi-cloud-check me-1" aria-hidden="true"></i>Results from DummyJSON
+                </span>
+            }
+            else
+            {
+                <span class="badge rounded-pill bg-warning-subtle text-warning-emphasis">
+                    <i class="bi bi-device-ssd me-1" aria-hidden="true"></i>Results from this device
+                </span>
+                <span class="text-body-secondary ms-1">
+                    @(search.ServerError?.Kind == ApiFailureKind.Network
+                        ? "DummyJSON couldn't be reached, so the products saved here were searched instead."
+                        : $"DummyJSON's search failed ({search.ServerError?.Message}), so the products saved here were searched instead.")
+                </span>
+            }
+        </div>
+    }
+}
+else
+{
+    <FreshnessBar IsRefreshing="_refreshing" Result="_refreshResult" LastRefreshed="_lastRefreshed"
+                  OnRefresh="() => RefreshAsync(force: true)" />
+}
+<SyncStatusLine />
+
+@if (_page is null)
+{
+    <LoadingIndicator Text="@(IsSearching ? "Searching…" : "Loading products…")" />
+}
+else if (_page.Items.Count == 0)
+{
+    <div class="text-center py-5 text-body-secondary">
+        <i class="bi bi-inbox display-5 d-block mb-3" aria-hidden="true"></i>
+        @if (IsSearching)
+        {
+            <p>No products match “@Query”.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="ClearSearch">Show all products</button>
+        }
+        else if (_page.TotalCount > 0)
+        {
+            <p>There are no products on this page.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="() => GoToPage(1)">Go to the first page</button>
+        }
+        else if (_refreshing)
+        {
+            <p>Downloading the catalogue to this device…</p>
+        }
+        else
+        {
+            <p>Nothing is saved on this device yet. Connect to the internet once to download the catalogue.</p>
+        }
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover table-products mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col" class="ps-3">Product</th>
+                        <th scope="col" class="d-none d-md-table-cell">Category</th>
+                        <th scope="col" class="text-end">Price</th>
+                        <th scope="col" class="text-end d-none d-sm-table-cell">Stock</th>
+                        <th scope="col" class="text-end pe-3"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (Product product in _page.Items)
+                    {
+                        <tr @key="product.Id">
+                            <td class="ps-3">
+                                <div class="d-flex align-items-center gap-3">
+                                    <ProductThumbnail Url="product.ThumbnailUrl" />
+                                    <div>
+                                        <a href="products/@product.Id" class="fw-semibold text-decoration-none">@product.Details.Title</a>
+                                        @if (product.Details.Brand is not null)
+                                        {
+                                            <div class="small text-body-secondary">@product.Details.Brand</div>
+                                        }
+                                        <SyncStateBadge State="product.SyncState" />
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="d-none d-md-table-cell">
+                                <span class="badge rounded-pill bg-body-tertiary text-body border">@Formatting.Category(product.Details.Category)</span>
+                            </td>
+                            <td class="text-end text-nowrap">@Formatting.Price(product.Details.Price)</td>
+                            <td class="text-end d-none d-sm-table-cell">
+                                @if (product.IsInStock)
+                                {
+                                    @product.Details.Stock
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-danger">Out of stock</span>
+                                }
+                            </td>
+                            <td class="text-end pe-3 text-nowrap">
+                                <a href="products/@product.Id/edit" class="btn btn-sm btn-outline-secondary" title="Edit">
+                                    <i class="bi bi-pencil" aria-hidden="true"></i><span class="visually-hidden">Edit @product.Details.Title</span>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" @onclick="() => AskToDelete(product)">
+                                    <i class="bi bi-trash" aria-hidden="true"></i><span class="visually-hidden">Delete @product.Details.Title</span>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+        <span class="small text-body-secondary">Page @_page.PageNumber of @_page.PageCount</span>
+        <Pager PageNumber="_page.PageNumber" PageCount="_page.PageCount" OnPageSelected="GoToPage" />
+    </div>
+}
+
+<ConfirmDialog IsOpen="_pendingDelete is not null" Title="Delete product?" ConfirmText="Delete"
+               ConfirmButtonClass="btn-danger" IsBusy="_deleting" OnConfirm="DeleteAsync" OnCancel="CancelDelete">
+    <p>Delete <strong>@_pendingDelete?.Details.Title</strong>? This can't be undone.</p>
+</ConfirmDialog>
+
+@code {
+    private const int PageSize = 10;
+
+    private PagedResult<Product>? _page;
+    private ProductSearchResult? _searchResult;
+    private int _loadVersion;
+    private string? _searchText;
+
+    private bool _refreshing;
+    private bool _wasOnline;
+    private RefreshResult? _refreshResult;
+    private DateTimeOffset? _lastRefreshed;
+
+    private Product? _pendingDelete;
+    private bool _deleting;
+
+    /// <summary>1-based page number from the <c>?page=</c> query string.</summary>
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageNumber { get; set; }
+
+    /// <summary>Search text from the <c>?q=</c> query string.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
+    private bool IsSearching => !string.IsNullOrWhiteSpace(Query);
+
+    private int Skip => (Math.Max(1, PageNumber ?? 1) - 1) * PageSize;
+
+    private string Summary => _page switch
+    {
+        null => "Browse, search and edit the DummyJSON catalogue.",
+        _ when IsSearching => $"{_page.TotalCount} results for “{Query}”",
+        _ => $"{_page.TotalCount} products",
+    };
+
+    // Paging and search are kept in the URL, so the browser's Back button and bookmarks work as expected.
+    protected override async Task OnParametersSetAsync()
+    {
+        _searchText = Query;
+        int version = ++_loadVersion;
+
+        try
+        {
+            if (IsSearching)
+            {
+                _page = null;
+                ProductSearchResult result = await ProductService.SearchAsync(Query!, Skip, PageSize, ComponentToken);
+                if (version == _loadVersion)
+                {
+                    _searchResult = result;
+                    _page = result.Page;
+                }
+
+                return;
+            }
+
+            // LEARN: Stale-while-revalidate. First show what's saved on this device, which is instant and works
+            // offline. Then ask the server for anything newer, and re-read the local page only if something changed.
+            // The user never waits on the network to see data, and the network never overwrites unsent local changes.
+            _searchResult = null;
+            await LoadLocalPageAsync(version);
+            StateHasChanged();
+            await RefreshAsync(force: false);
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+            // The user left the page; nothing to update.
+        }
+    }
+
+    private async Task LoadLocalPageAsync(int version)
+    {
+        PagedResult<Product> page = await ProductService.GetPageAsync(Skip, PageSize, ComponentToken);
+        DateTimeOffset? lastRefreshed = await ProductService.GetLastRefreshedAsync(ComponentToken);
+        if (version == _loadVersion)
+        {
+            _page = page;
+            _lastRefreshed = lastRefreshed;
+        }
+    }
+
+    private async Task RefreshAsync(bool force)
+    {
+        if (_refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
+        try
+        {
+            _refreshResult = await ProductService.RefreshCatalogueAsync(force, ComponentToken);
+
+            // Reload whichever page is showing now: the user may have paged on while the refresh ran.
+            if (_refreshResult.Status == RefreshStatus.Refreshed && !IsSearching)
+            {
+                await LoadLocalPageAsync(_loadVersion);
+            }
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private void Search()
+    {
+
+        string? query = string.IsNullOrWhiteSpace(_searchText) ? null : _searchText.Trim();
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["q"] = query,
+            ["page"] = null,
+        }));
+    }
+
+    private void ClearSearch()
+    {
+        _searchText = null;
+        Search();
+    }
+
+    private void GoToPage(int page)
+    {
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 1 ? null : page));
+    }
+
+    protected override void OnInitialized()
+    {
+        _wasOnline = Connectivity.IsOnline;
+        Scheduler.Changed += OnSyncChanged;
+        Connectivity.Changed += OnConnectivityChanged;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Scheduler.Changed -= OnSyncChanged;
+            Connectivity.Changed -= OnConnectivityChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    // Back online: the saved copy may be stale, so revalidate it now rather than on the next visit.
+    private void OnConnectivityChanged()
+    {
+        bool online = Connectivity.IsOnline;
+        if (online && !_wasOnline && !IsSearching)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                await RefreshAsync(force: true);
+                StateHasChanged();
+            });
+        }
+
+        _wasOnline = online;
+    }
+
+    // A finished sync run may have changed sync states (badges) and server ids, so re-read the page that's showing.
+    private void OnSyncChanged()
+    {
+        if (!Scheduler.IsRunning && !IsSearching)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await LoadLocalPageAsync(_loadVersion);
+                    StateHasChanged();
+                }
+                catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+                {
+                }
+            });
+        }
+    }
+
+    private void AskToDelete(Product product)
+    {
+        _pendingDelete = product;
+    }
+
+    private void CancelDelete()
+    {
+        _pendingDelete = null;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_pendingDelete is not { } product)
+        {
+            return;
+        }
+
+        _deleting = true;
+        try
+        {
+            // Local-first: this only touches IndexedDB, so it works offline. The outbox sends the delete later.
+            await ProductService.DeleteAsync(product.Id, ComponentToken);
+            Toasts.Show($"Deleted “{product.Details.Title}” on this device. The delete will sync in the background.", ToastKind.Success);
+            _pendingDelete = null;
+
+            if (IsSearching)
+            {
+                _page = _page is null ? null : _page with
+                {
+                    Items = [.. _page.Items.Where(item => item.Id != product.Id)],
+                    TotalCount = _page.TotalCount - 1,
+                };
+            }
+            else
+            {
+                await LoadLocalPageAsync(_loadVersion);
+            }
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}

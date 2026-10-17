@@ -1,0 +1,85 @@
+﻿@implements IDisposable
+@inject SyncScheduler Scheduler
+@inject IConnectivityService Connectivity
+
+<nav class="navbar navbar-expand-md app-navbar" data-bs-theme="dark" aria-label="Main">
+    <div class="container">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="">
+            <i class="bi bi-cloud-slash" aria-hidden="true"></i>
+            Offline CRUD
+        </a>
+
+        @* Toggled by Blazor state rather than Bootstrap's JavaScript, so no Bootstrap JS is loaded. *@
+        <button class="navbar-toggler" type="button" aria-controls="main-nav" aria-expanded="@(!_collapsed)"
+                aria-label="Toggle navigation" @onclick="Toggle">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div id="main-nav" class="navbar-collapse @(_collapsed ? "collapse" : null)">
+            <ul class="navbar-nav ms-auto align-items-md-center" @onclick="Collapse">
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                        <i class="bi bi-house me-1" aria-hidden="true"></i>Home
+                    </NavLink>
+                </li>
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="products">
+                        <i class="bi bi-box-seam me-1" aria-hidden="true"></i>Products
+                    </NavLink>
+                </li>
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="sync">
+                        <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Sync
+                        @if (PendingCount > 0)
+                        {
+                            <span class="badge rounded-pill @(FailedCount > 0 ? "text-bg-danger" : "text-bg-warning") ms-1">
+                                @PendingCount<span class="visually-hidden"> changes waiting to sync</span>
+                            </span>
+                        }
+                    </NavLink>
+                </li>
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="about">
+                        <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>About
+                    </NavLink>
+                </li>
+            </ul>
+
+            @* LEARN: "Simulate offline" makes the app fail its own requests (see ConnectivityHandler), so the offline
+               pattern can be shown without DevTools. DevTools → Network → Offline does it for real, at the browser level. *@
+            <div class="form-check form-switch text-white ms-md-3 my-2 my-md-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="simulate-offline"
+                       checked="@Connectivity.IsSimulatingOffline" @onchange="OnSimulateChanged" />
+                <label class="form-check-label small" for="simulate-offline">Simulate offline</label>
+            </div>
+        </div>
+    </div>
+</nav>
+
+@code {
+    private bool _collapsed = true;
+
+    private int PendingCount => Scheduler.Outbox.Count;
+
+    private int FailedCount => Scheduler.Outbox.Count(entry => entry.Status == OutboxStatus.Failed);
+
+    protected override void OnInitialized()
+    {
+        Scheduler.Changed += OnChanged;
+        Connectivity.Changed += OnChanged;
+    }
+
+    public void Dispose()
+    {
+        Scheduler.Changed -= OnChanged;
+        Connectivity.Changed -= OnChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnSimulateChanged(ChangeEventArgs args) => Connectivity.SetSimulatedOffline(args.Value is true);
+
+    private void Toggle() => _collapsed = !_collapsed;
+
+    private void Collapse() => _collapsed = true;
+}

@@ -1,0 +1,48 @@
+@* Shows whether a product's latest change has reached the server. Renders nothing for Synced unless ShowSynced is set. *@
+
+@if (State != SyncState.Synced || ShowSynced)
+{
+    <span class="badge rounded-pill @CssClass" title="@Description">
+        <i class="bi @Icon me-1" aria-hidden="true"></i>@Label
+    </span>
+}
+
+@code {
+    /// <summary>The state to show.</summary>
+    [Parameter]
+    public SyncState State { get; set; }
+
+    /// <summary>Whether to show a badge for <see cref="SyncState.Synced"/> too.</summary>
+    [Parameter]
+    public bool ShowSynced { get; set; }
+
+    private string Label => State switch
+    {
+        SyncState.Synced => "Synced",
+        SyncState.PendingCreate => "New, not synced",
+        SyncState.PendingUpdate => "Edited, not synced",
+        SyncState.PendingDelete => "Delete not synced",
+        _ => "Sync failed",
+    };
+
+    private string Description => State switch
+    {
+        SyncState.Synced => "The server has confirmed this version.",
+        SyncState.Failed => "The server rejected the last change. It won't be retried automatically.",
+        _ => "Saved on this device. Waiting to be sent to the server.",
+    };
+
+    private string Icon => State switch
+    {
+        SyncState.Synced => "bi-cloud-check",
+        SyncState.Failed => "bi-exclamation-triangle",
+        _ => "bi-cloud-arrow-up",
+    };
+
+    private string CssClass => State switch
+    {
+        SyncState.Synced => "bg-success-subtle text-success-emphasis",
+        SyncState.Failed => "bg-danger-subtle text-danger-emphasis",
+        _ => "bg-warning-subtle text-warning-emphasis",
+    };
+}

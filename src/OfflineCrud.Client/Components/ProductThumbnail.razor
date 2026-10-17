@@ -1,0 +1,37 @@
+@* A product image that falls back to a local placeholder when there is no URL or the image fails to load. *@
+
+<img src="@(_failed || Url is null ? PlaceholderPath : Url.ToString())" alt="@Alt" class="@CssClass" loading="lazy"
+     @onerror="OnError" />
+
+@code {
+    // LEARN: Product images come from DummyJSON's CDN. Unlike the app's own CSS and JS, they aren't part of the
+    // cached app shell, so offline they fail to load. The placeholder is a local file, so it always works.
+    private const string PlaceholderPath = "img/product-placeholder.svg";
+
+    private bool _failed;
+    private Uri? _previousUrl;
+
+    /// <summary>The image URL, or <see langword="null"/> to show the placeholder.</summary>
+    [Parameter]
+    public Uri? Url { get; set; }
+
+    /// <summary>Alternative text.</summary>
+    [Parameter]
+    public string Alt { get; set; } = string.Empty;
+
+    /// <summary>CSS classes for the image.</summary>
+    [Parameter]
+    public string CssClass { get; set; } = "product-thumb";
+
+    protected override void OnParametersSet()
+    {
+        // The component can be reused for a different product (e.g. when paging), so reset the failure flag.
+        if (Url != _previousUrl)
+        {
+            _failed = false;
+            _previousUrl = Url;
+        }
+    }
+
+    private void OnError() => _failed = true;
+}

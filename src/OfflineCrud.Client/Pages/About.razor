@@ -1,0 +1,162 @@
+@page "/about"
+
+<PageTitle>About · Offline CRUD</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>How it works</h1>
+        <p class="text-body-secondary mb-0">The architecture, the offline pattern, and where the project is up to.</p>
+    </div>
+</div>
+
+<section class="mb-5" aria-labelledby="architecture-heading">
+    <h2 id="architecture-heading" class="h4">Architecture</h2>
+    <p>
+        Clean Architecture: each layer depends only on the layers inside it. The Domain and Application layers are plain
+        .NET with no knowledge of the browser. The browser-specific parts (HTTP, IndexedDB, JavaScript interop) live in
+        Infrastructure and are wired up by the Client at start-up.
+    </p>
+
+    <div class="row g-4 align-items-stretch">
+        <div class="col-lg-7">
+            <div class="layer layer-outer h-100" role="img"
+                 aria-label="Diagram: the browser tab contains the Client and Infrastructure layers, which both depend on the Application layer, which depends on the Domain layer at the centre.">
+                <span class="layer-label"><i class="bi bi-window me-1" aria-hidden="true"></i>Browser tab (WebAssembly)</span>
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <div class="layer layer-client h-100">
+                            <span class="layer-label">Client</span>
+                            <p class="small mb-0">Razor pages and components. The composition root in <code>Program.cs</code>.</p>
+                        </div>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="layer layer-infrastructure h-100">
+                            <span class="layer-label">Infrastructure</span>
+                            <p class="small mb-0">HttpClient for DummyJSON, IndexedDB through a hand-written JS module, and connectivity from the browser's online/offline events.</p>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="layer layer-application">
+                            <span class="layer-label">Application</span>
+                            <p class="small mb-3">Use cases (<code>IProductService</code>), the sync engine (<code>SyncService</code>), and the ports the outer layers implement (<code>IProductApiClient</code>, <code>IProductRepository</code>, <code>IOutboxStore</code>).</p>
+                            <div class="layer layer-domain">
+                                <span class="layer-label">Domain</span>
+                                <p class="small mb-0">Products and their rules. No dependencies at all.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h3 class="h6">Why it's arranged like this</h3>
+                    <ul class="small mb-0">
+                        <li class="mb-2">Pages call <code>IProductService</code>, never HttpClient or IndexedDB. Switching the service to read from IndexedDB first in Phase 2 didn't change what the pages call.</li>
+                        <li class="mb-2">The sync engine's rules (ordering, retries, coalescing) are plain C#, so they can be unit tested without a browser.</li>
+                        <li class="mb-2">The Client references Infrastructure only so <code>Program.cs</code> can register it. There's no server, so the browser is the composition root.</li>
+                        <li>Tests check that Domain and Application never reference the outer layers.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="mb-5" aria-labelledby="pattern-heading">
+    <h2 id="pattern-heading" class="h4">The offline pattern</h2>
+    <p>
+        A browser app has no guaranteed connection. The fix is to make the device's own storage the source of truth for
+        the UI, and treat the API as somewhere changes are <em>synced to</em>, not where they're saved.
+        <span class="badge bg-primary-subtle text-primary-emphasis">Reads: Phase 2 · Writes: Phase 3</span>
+    </p>
+    <ol class="row g-3 list-unstyled">
+        <li class="col-md-6 col-xl-3">
+            <div class="card flow-step">
+                <div class="card-body">
+                    <span class="step-number mb-2">1</span>
+                    <h3 class="h6">Validate</h3>
+                    <p class="small text-body-secondary mb-0">The form checks the input in the browser. No round trip needed.</p>
+                </div>
+            </div>
+        </li>
+        <li class="col-md-6 col-xl-3">
+            <div class="card flow-step">
+                <div class="card-body">
+                    <span class="step-number mb-2">2</span>
+                    <h3 class="h6">Save locally + queue</h3>
+                    <p class="small text-body-secondary mb-0">
+                        One IndexedDB transaction writes the product <em>and</em> an outbox entry. Either both happen or
+                        neither does.
+                    </p>
+                </div>
+            </div>
+        </li>
+        <li class="col-md-6 col-xl-3">
+            <div class="card flow-step">
+                <div class="card-body">
+                    <span class="step-number mb-2">3</span>
+                    <h3 class="h6">Update the UI</h3>
+                    <p class="small text-body-secondary mb-0">The change shows immediately, marked as pending.</p>
+                </div>
+            </div>
+        </li>
+        <li class="col-md-6 col-xl-3">
+            <div class="card flow-step">
+                <div class="card-body">
+                    <span class="step-number mb-2">4</span>
+                    <h3 class="h6">Sync when online</h3>
+                    <p class="small text-body-secondary mb-0">
+                        The sync engine sends queued entries in order, retries temporary failures with backoff, and flags
+                        permanent ones.
+                    </p>
+                </div>
+            </div>
+        </li>
+    </ol>
+</section>
+
+<section id="roadmap" aria-labelledby="roadmap-heading">
+    <h2 id="roadmap-heading" class="h4">Roadmap</h2>
+    <div class="card">
+        <ul class="list-group list-group-flush">
+            @foreach (Milestone milestone in Milestones)
+            {
+                <li class="list-group-item d-flex gap-3 align-items-start py-3">
+                    @if (milestone.Done)
+                    {
+                        <i class="bi bi-check-circle-fill text-success fs-5" aria-hidden="true"></i>
+                    }
+                    else
+                    {
+                        <i class="bi bi-circle text-body-secondary fs-5" aria-hidden="true"></i>
+                    }
+                    <div>
+                        <div class="fw-semibold">
+                            Phase @milestone.Number: @milestone.Title
+                            <span class="visually-hidden">@(milestone.Done ? "(done)" : "(not started)")</span>
+                        </div>
+                        <div class="small text-body-secondary">@milestone.Summary</div>
+                    </div>
+                </li>
+            }
+        </ul>
+    </div>
+</section>
+
+@code {
+    // Keep this in step with the phases in docs/offline-crud-spec.md as each one is completed.
+    private static readonly Milestone[] Milestones =
+    [
+        new(0, "Scaffold", "Solution, layered projects, build settings, verified API notes.", Done: true),
+        new(1, "Online-only CRUD", "Every page works straight against DummyJSON. The \"before\" picture.", Done: true),
+        new(2, "IndexedDB local store", "A hand-written JS module, a local repository, stale-while-revalidate reads.", Done: true),
+        new(3, "Outbox + sync engine", "Transactional local writes, ordered sync, retries with backoff, coalescing.", Done: true),
+        new(4, "Connectivity + UX", "Online/offline detection, a simulate-offline switch, pending badges, the sync page.", Done: true),
+        new(5, "PWA app shell", "Service worker caching and an offline start-up test on a published build.", Done: true),
+        new(6, "Polish", "Component tests, accessibility pass, finished learning notes.", Done: true),
+    ];
+
+    private sealed record Milestone(int Number, string Title, string Summary, bool Done);
+}

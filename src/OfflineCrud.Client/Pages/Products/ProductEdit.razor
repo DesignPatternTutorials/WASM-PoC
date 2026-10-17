@@ -1,0 +1,118 @@
+@page "/products/{Id:guid}/edit"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+
+<PageTitle>Edit @(_title ?? "product") · Offline CRUD</PageTitle>
+
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="products">Products</a></li>
+        <li class="breadcrumb-item"><a href="products/@Id">@(_title ?? "Product")</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Edit</li>
+    </ol>
+</nav>
+
+<div class="page-header">
+    <h1>Edit product</h1>
+</div>
+
+<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
+
+@if (_loading)
+{
+    <LoadingIndicator Text="Loading product…" />
+}
+else if (_model is not null)
+{
+    @if (_saved is not null)
+    {
+        <div class="alert alert-success" role="status">
+            <div class="fw-semibold"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Saved on this device</div>
+            The change is queued and will be sent to DummyJSON in the background, online or as soon as you're back online.
+            Edit again before it's sent and only the latest version goes. <a href="products/@Id" class="alert-link">View the product</a>.
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-body p-4">
+            <ProductForm Model="_model" Categories="_categories" IsSaving="_saving" SubmitText="Save changes"
+                         CancelHref="@($"products/{Id}")" OnValidSubmit="SaveAsync" />
+        </div>
+    </div>
+}
+else if (_loadError is null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-question-circle display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
+        <h2 class="h4">Product not found</h2>
+        <p class="text-body-secondary">There's no product with this id saved on this device.</p>
+        <a href="products" class="btn btn-outline-primary">Back to products</a>
+    </div>
+}
+
+@code {
+    private ProductFormModel? _model;
+    private string? _title;
+    private IReadOnlyList<string> _categories = [];
+    private ApiException? _loadError;
+    private bool _loading = true;
+    private bool _saving;
+    private Product? _saved;
+
+    /// <summary>The product's local id from the route.</summary>
+    [Parameter]
+    public Guid Id { get; set; }
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            // Start both requests before awaiting either, so they run in parallel. The browser sends both fetches
+            // at once, even though .NET in WebAssembly runs on a single thread.
+            Task<Product?> productTask = ProductService.GetAsync(Id, ComponentToken);
+            Task<IReadOnlyList<string>> categoriesTask = ProductService.GetCategoriesAsync(ComponentToken);
+
+            Product? product = await productTask;
+            _categories = await categoriesTask;
+
+            _title = product?.Details.Title;
+            _model = product is null ? null : ProductFormModel.From(product.Details);
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex;
+            _model = null;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync(ProductFormModel model)
+    {
+        _saving = true;
+        _saved = null;
+        try
+        {
+            // LEARN: Optimistic UI. The save resolves as soon as IndexedDB commits, so the confirmation shows at once,
+            // before (and whether or not) the server has heard about it.
+            _saved = await ProductService.UpdateAsync(Id, model.ToDetails(), ComponentToken);
+            _title = _saved.Details.Title;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
