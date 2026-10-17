@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold).
-- **Next:** Phase 1 (online-only CRUD).
+- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD).
+- **Next:** Phase 2 (IndexedDB local store).
 
-Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge.
+Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
 ## Commands
 
@@ -33,7 +33,12 @@ Clean Architecture. Dependencies point inward only:
 - `OfflineCrud.Application`: use cases, ports (`IProductRepository`, `IOutboxStore`, `IProductApiClient`, `IConnectivityService`, `ISyncService`), DTOs. References Domain only.
 - `OfflineCrud.Infrastructure`: browser implementations of the Application ports: IndexedDB via a hand-rolled JS module, `HttpClient` for DummyJSON, connectivity via JS events. It's a Razor class library so `wwwroot/js/*.js` ships as static web assets at `_content/OfflineCrud.Infrastructure/js/...`. Don't replace the JS interop with a third-party IndexedDB package; keeping the interop visible is the point.
 - `OfflineCrud.Client`: Blazor WASM (PWA template). UI plus the DI **composition root**. It references Infrastructure *only* so `Program.cs` can register implementations. Pages and components depend on Application interfaces, never on Infrastructure types.
-- `tests/OfflineCrud.Application.Tests`: NUnit + Moq. `ArchitectureTests` enforce the layering on compiled assemblies.
+- `tests/OfflineCrud.Application.Tests`: NUnit + Moq. Covers Domain and Application. `ArchitectureTests` enforce the layering on compiled assemblies.
+- `tests/OfflineCrud.Infrastructure.Tests`: NUnit. Tests `DummyJsonProductApiClient` against `StubHttpMessageHandler` (no network). Reaches internals via `InternalsVisibleTo`.
+
+How a request flows: a page (inheriting `CancellableComponentBase`, which cancels on dispose) calls `IProductService`. That calls `IProductApiClient`, implemented by `DummyJsonProductApiClient`. The client turns every HTTP or JSON failure into an `ApiException` with an `ApiFailureKind`, and pages show it with `ApiErrorAlert`. `IsTransient` (network, 5xx, 429) is the retry signal the Phase 3 sync engine should use. Don't let `HttpRequestException` escape Infrastructure.
+
+Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 
 If a change would add a reference that breaks this direction, stop and ask.
 
@@ -41,7 +46,9 @@ Key design rules from the spec:
 
 - IndexedDB is the UI's source of truth; the API is a sync target.
 - A local write and its outbox entry go in one IndexedDB transaction.
-- App-shell assets (CSS, JS, fonts, icons) must be local. No CDNs, or offline start-up breaks.
+- App-shell assets (CSS, JS, fonts, icons) must be local. No CDNs, or offline start-up breaks. Bootstrap 5.3 and Bootstrap Icons 1.11.3 are vendored under `wwwroot/lib`. The theme is CSS variables in `wwwroot/css/app.css`; there's no Sass build.
+- No Bootstrap JavaScript is loaded. The navbar toggle and modals are driven by Blazor state.
+- `index.html` is processed at build time (`OverrideHtmlAssetPlaceholders`). Rebuild before checking what the dev server serves.
 
 ## DummyJSON behaviour
 
