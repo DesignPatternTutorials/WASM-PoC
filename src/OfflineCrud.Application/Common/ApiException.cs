@@ -4,8 +4,8 @@ namespace OfflineCrud.Application.Common;
 /// A failed call to the remote API, classified so callers don't need to know about HTTP.
 /// </summary>
 /// <remarks>
-/// The classification is what the Phase 3 sync engine will use to decide between retrying
-/// (<see cref="IsTransient"/>) and giving up with a readable reason.
+/// The sync engine uses this classification to decide between retrying (<see cref="IsTransient"/>) and giving up
+/// with a readable reason.
 /// </remarks>
 public sealed class ApiException : Exception
 {
