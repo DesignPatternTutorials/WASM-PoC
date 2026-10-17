@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD).
-- **Next:** Phase 2 (IndexedDB local store).
+- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store).
+- **Next:** Phase 3 (outbox + sync engine).
 
 Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
@@ -36,7 +36,19 @@ Clean Architecture. Dependencies point inward only:
 - `tests/OfflineCrud.Application.Tests`: NUnit + Moq. Covers Domain and Application. `ArchitectureTests` enforce the layering on compiled assemblies.
 - `tests/OfflineCrud.Infrastructure.Tests`: NUnit. Tests `DummyJsonProductApiClient` against `StubHttpMessageHandler` (no network). Reaches internals via `InternalsVisibleTo`.
 
-How a request flows: a page (inheriting `CancellableComponentBase`, which cancels on dispose) calls `IProductService`. That calls `IProductApiClient`, implemented by `DummyJsonProductApiClient`. The client turns every HTTP or JSON failure into an `ApiException` with an `ApiFailureKind`, and pages show it with `ApiErrorAlert`. `IsTransient` (network, 5xx, 429) is the retry signal the Phase 3 sync engine should use. Don't let `HttpRequestException` escape Infrastructure.
+How a request flows: a page (inheriting `CancellableComponentBase`, which cancels on dispose) calls `IProductService`. That calls `IProductRepository` (IndexedDB) for reads and `IProductApiClient` (DummyJSON) for refreshes and writes.
+
+- **API errors:** `DummyJsonProductApiClient` turns every HTTP or JSON failure into an `ApiException` with an `ApiFailureKind`, and pages show it with `ApiErrorAlert`. `IsTransient` (network, 5xx, 429) is the retry signal for the sync engine. Don't let `HttpRequestException` escape Infrastructure.
+- **Refresh results:** refresh methods return a `RefreshResult` instead of throwing.
+
+Local storage rules (Phase 2):
+
+- **Identity:** `Product.Id` is a local `Guid`. `ServerId` is not unique, because every DummyJSON create returns 195. Routes use the GUID.
+- **Merging server data:** goes through `ServerCopyMerger` and `Product.ShouldAcceptServerCopy`. A server copy replaces a local one only if the local copy is `Synced`, isn't a tombstone, and the version token (`meta.updatedAt`) differs.
+- **Deletes:** are tombstones (`IsDeleted`), never removals.
+- **Writes after reads:** read-merge-write sequences take `ProductService._storeLock`.
+- **The JS module (`src/OfflineCrud.Infrastructure/wwwroot/js/indexedDb.js`):** the schema is versioned by the length of its `migrations` array. Add a step; never edit a shipped one. Multi-record writes must go through `writeAll()`, which aborts on synchronous errors so batches stay all-or-nothing. Field names in `ProductRecord` must match the index key paths in the JS (`ProductRecordMapperTests` checks them).
+- **Testing:** the JS module isn't covered by `dotnet test`. Check changes to it with a browser (DevTools → Application → IndexedDB) or a Node run against `fake-indexeddb`.
 
 Form validation lives in two places that must agree: data annotations on `ProductFormModel` (drive `EditForm`) and guard clauses in `ProductDetails` (the domain backstop). `ProductFormModelTests` checks they match, so update both together.
 

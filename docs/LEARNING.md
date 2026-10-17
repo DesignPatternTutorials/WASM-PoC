@@ -146,3 +146,99 @@ only non-secret values there (here, the API base address).
   tab the first request shows as cancelled.
 - **Validation.** Clear the title, or enter a discount of 150. The messages come from the data annotations,
   and nothing is sent.
+
+## Phase 2: IndexedDB local store
+
+### What was built
+
+- **`wwwroot/js/indexedDb.js`** (in Infrastructure): a small, hand-written ES module. Versioned schema with a
+  migrations list; a `products` store with `byServerId` and `byListOrder` (`[deleted, titleKey]`) indexes; a `meta`
+  key/value store; paging with a cursor and `advance()`; all-or-nothing batch writes.
+- **`IndexedDbProductRepository`** implements the new `IProductRepository` port by importing that module through
+  `IJSRuntime` and calling its functions. `ProductRecord` is the shape that crosses the interop boundary.
+- **Local identity:** `Product.Id` is now a `Guid` generated on this device. `ServerId` and `ServerVersion` are
+  bookkeeping, and routes are `/products/{guid}`.
+- **`ServerCopyMerger`** (pure, unit tested): decides how server data combines with what's stored.
+- **`ProductService`**: reads from local storage, refreshes the whole catalogue in the background (at most once a minute
+  unless forced), searches the server with a fallback to the device, and still writes server-first.
+- **UI:** a freshness line on the list ("Saved on this device, updated 2 minutes ago" / "Offline…"), a source badge
+  on search results, and a sync note plus local/server ids on the detail page.
+
+### Key concepts
+
+**Stale-while-revalidate.** Show what's stored *now*, then ask the server for anything newer and re-render if it
+changed. The user never waits on the network to see data, and the network failing just means "no newer data". See
+`ProductList.OnParametersSetAsync` and `ProductDetail.OnParametersSetAsync`.
+
+**Local identity vs server identity.** A local-first app can't key its data by the server's id: the record may exist
+before the server has seen it (Phase 3), and here DummyJSON gives every create id 195. So the local GUID is the key and
+the server id is just a field. In interviews this is the "client-generated ids" point. (A GUID also doubles as an
+idempotency key; see Phase 3.)
+
+**Versions decide whether the server wins.** A refresh only replaces a local copy when the server's version token
+differs from the one the copy was based on (`Product.ShouldAcceptServerCopy`). The token is opaque and only compared for
+equality, like an ETag. That one rule is why:
+- an edit survives a refresh even though DummyJSON forgot it (same version → nothing new to apply);
+- a delete sticks (the tombstone never accepts server copies);
+- Phase 3's pending changes will be safe (only `Synced` copies accept server data).
+
+Against a real API, a successful PUT returns a *new* version, so the rule still holds, and a change made elsewhere
+arrives because its version differs. What it can't do on its own is detect a *conflict* (both sides changed). That
+needs the server to check the version on write (`If-Match` → `412 Precondition Failed`).
+
+**Tombstones.** Deleting marks the record `deleted` instead of removing it, so a refresh can't resurrect it. A real
+system eventually purges tombstones once the server confirms the delete and stops returning the item.
+
+**The JS interop boundary** (`IndexedDbProductRepository`, `ProductRecord`):
+- Arguments and results are serialised with System.Text.Json (camelCase). JS sees plain objects. `Guid` becomes a
+  string, `decimal` becomes a double, and enums are stored by name so they read well in DevTools.
+- Everything is async. The `CancellationToken` only stops .NET waiting, and the JS work carries on.
+- `import()` returns an `IJSObjectReference` to the module. It's created lazily, once, and disposed with the repository.
+- `IJSInProcessRuntime` (WASM-only) allows synchronous calls, but IndexedDB is asynchronous anyway.
+
+**IndexedDB essentials** (all in `indexedDb.js`):
+- Records are schemaless, but **stores and indexes are versioned**. Only `upgradeneeded` can change them. The
+  migrations list runs every step from the user's old version to the current one.
+- **Indexes skip invalid keys.** Records with `serverId: null` are left out of `byServerId`. Booleans aren't valid keys,
+  so `deleted` is 0/1.
+- **Transactions auto-commit** when they have no pending requests. Awaiting anything else mid-transaction lets them
+  commit early.
+- **A synchronous `put()` error doesn't abort the transaction.** See the gotcha below.
+
+**Concurrency without threads.** WASM is single-threaded, but every `await` lets other work run. `ProductService`
+takes a `SemaphoreSlim` around each read-merge-write so a background refresh can't write back a stale copy over a
+save. It only protects this tab; two tabs share the database but not the lock.
+
+### Gotchas
+
+- **All-or-nothing needs an explicit `abort()`.** `store.put()` can throw synchronously (e.g. a record with no valid
+  key). That exception doesn't abort the transaction, so the earlier puts in the batch still commit. A Node smoke test
+  against `fake-indexeddb` caught this, and `writeAll()` now aborts on any synchronous error.
+- **Passing an array to `params object?[]`.** `module.InvokeVoidAsync("putProducts", token, records)` would spread a
+  `ProductRecord[]` into one JS argument per record (array covariance). Wrap it as `[records]`.
+- **DummyJSON's PUT response has no `meta`.** If an update stored "no version", the next refresh would see a version
+  where there was none and overwrite the edit. `UpdateAsync` keeps the previous version when the response has none
+  (there's a unit test for this).
+- **Search differs offline.** DummyJSON's search rules aren't documented. The device search matches every word in
+  title, brand, category or description, so results can differ a little. The badge says which source answered.
+- **The catalogue is refreshed whole.** That's fine for 194 products (~25 KB compressed). A large dataset would need
+  delta sync (`?updatedSince=`), which DummyJSON doesn't offer.
+
+### Things to try
+
+- **Look inside the database.** DevTools → Application → Storage → IndexedDB → `offline-crud` → `products`. Expand
+  `byListOrder` to see the index order. `meta` holds `catalogueLastRefreshed`.
+- **Browse offline.** Load `/products` once online, then DevTools → Network → Offline. Page through, open products,
+  search: it all still works, and the freshness line says "Offline". Searching shows "Results from this device".
+- **Watch the revalidation.** Throttle to Slow 4G and open `/products`. The saved list appears instantly, and the line
+  says "Checking DummyJSON for updates…" until the response arrives.
+- **Edit survives refresh.** Edit a title and save, then "Refresh now" on the list. The edit stays (same server version).
+  Compare Phase 1, where it vanished.
+- **Delete sticks.** Delete a product, then "Refresh now". It stays gone. Look for the record with `deleted: 1` in
+  DevTools.
+- **Create shows up.** Create a product: it's in the list under its local id. Its detail page says "Only on this device".
+  Try editing it and see the 404 from DummyJSON (Phase 3 turns this into a Failed outbox entry).
+- **Start from empty.** DevTools → Application → Storage → "Clear site data", then reload `/products` online. You'll
+  see "Downloading the catalogue…". Do it offline instead and you'll see the empty-state message.
+- **Schema upgrade.** Add a version-2 step to `migrations` (e.g. a new index), reload, and watch `oldVersion` /
+  `newVersion` in a breakpoint on `onupgradeneeded`. Phase 3 does this for real when it adds the `outbox` store.

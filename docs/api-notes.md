@@ -84,6 +84,14 @@ Not every product has `brand`. Treat it as optional.
 - **Delete an existing product.** Succeeds, but the product reappears in the next list refresh. The
   local store should keep a tombstone or simply drop items the user deleted (decided in Phase 2/3).
 
+## Versions (`meta.updatedAt`)
+
+- `GET` responses include `meta.updatedAt` when `meta` is in `select` (`select=title,...,meta`). It's an ISO
+  timestamp and different for every product. The app uses it as an opaque version token, comparing for equality only.
+- `PUT` / `PATCH` responses **omit `meta` entirely**, and `POST /products/add` echoes only the fields you sent plus `id`.
+  So a write never returns a version. Keep the version you already had (see `ProductService.UpdateAsync`).
+- `meta` also carries `createdAt`, `barcode` and `qrCode`. `select` can't pick nested fields, so these come along.
+
 ## CORS
 
 - Requests with an `Origin` header get `access-control-allow-origin: <that origin>` and
