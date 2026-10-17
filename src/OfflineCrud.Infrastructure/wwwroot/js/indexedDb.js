@@ -13,6 +13,7 @@
 const DB_NAME = 'offline-crud';
 const PRODUCTS = 'products';
 const META = 'meta';
+const OUTBOX = 'outbox';
 
 // LEARN: Schema versioning. indexedDB.open(name, version) fires `upgradeneeded` when the stored version is lower than
 // the requested one, and only that event may create or change object stores and indexes. Each entry below upgrades from
@@ -31,6 +32,16 @@ const migrations = [
         products.createIndex('byListOrder', ['deleted', 'titleKey'], { unique: false });
 
         db.createObjectStore(META, { keyPath: 'key' });
+    },
+
+    // Version 1 → 2: the outbox of changes waiting to be sent. Existing products and metadata are untouched; only the
+    // new store is created. A user upgrading from version 1 keeps all their data.
+    (db) => {
+        const outbox = db.createObjectStore(OUTBOX, { keyPath: 'id' });
+        outbox.createIndex('byEntity', 'entityId', { unique: false });
+
+        // createdAt is an ISO 8601 UTC string, which sorts correctly as text.
+        outbox.createIndex('byCreated', 'createdAt', { unique: false });
     },
 ];
 
@@ -191,6 +202,44 @@ async function writeAll(transaction, write) {
         throw error;
     }
     await done;
+}
+
+/** Returns every outbox entry, oldest first. */
+export async function getOutboxEntries() {
+    const db = await openDatabase();
+    const index = db.transaction(OUTBOX, 'readonly').objectStore(OUTBOX).index('byCreated');
+    return promisify(index.getAll());
+}
+
+/** Returns the outbox entries for one product, oldest first. */
+export async function getOutboxEntriesForEntity(entityId) {
+    const db = await openDatabase();
+    const index = db.transaction(OUTBOX, 'readonly').objectStore(OUTBOX).index('byEntity');
+    const entries = await promisify(index.getAll(entityId));
+    return entries.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+
+/**
+ * Writes products and outbox changes in ONE transaction spanning both stores: every put and delete is applied, or none.
+ * LEARN: This is the transactional outbox. A transaction can span several object stores, as long as they're all named
+ * when it's opened, so a product change and the entry that will send it are committed together.
+ */
+export async function commit(products, outboxPuts, outboxDeletes) {
+    const db = await openDatabase();
+    const transaction = db.transaction([PRODUCTS, OUTBOX], 'readwrite');
+    const productStore = transaction.objectStore(PRODUCTS);
+    const outboxStore = transaction.objectStore(OUTBOX);
+    await writeAll(transaction, () => {
+        for (const product of products) {
+            productStore.put(product);
+        }
+        for (const entry of outboxPuts) {
+            outboxStore.put(entry);
+        }
+        for (const id of outboxDeletes) {
+            outboxStore.delete(id);
+        }
+    });
 }
 
 /** Returns a metadata value, or null if it isn't set. */
