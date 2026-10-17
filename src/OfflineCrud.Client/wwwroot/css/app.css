@@ -119,6 +119,26 @@ h1:focus {
     font-weight: 600;
 }
 
+.connectivity-banner-offline {
+    background-color: var(--bs-warning-bg-subtle);
+    color: var(--bs-warning-text-emphasis);
+    border-bottom: 1px solid var(--bs-warning-border-subtle);
+}
+
+.connectivity-banner-simulated {
+    background-color: #5b21b6;
+    color: #fff;
+}
+
+.app-navbar .form-check-input:not(:checked) {
+    background-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.toast-container {
+    z-index: 1090;
+}
+
 .app-main {
     flex: 1 0 auto;
     padding-block: 2rem;

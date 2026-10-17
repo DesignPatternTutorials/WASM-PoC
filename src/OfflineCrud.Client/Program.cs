@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using OfflineCrud.Application.Common;
+using OfflineCrud.Application.Connectivity;
 using OfflineCrud.Application.Products;
 using OfflineCrud.Application.Sync;
 using OfflineCrud.Client;
@@ -31,8 +32,13 @@ builder.Services.AddSingleton<IProductService, ProductService>();
 builder.Services.AddSingleton<ISyncService, SyncService>();
 builder.Services.AddSingleton<SyncScheduler>();
 builder.Services.AddSingleton<ISyncTrigger>(services => services.GetRequiredService<SyncScheduler>());
+builder.Services.AddSingleton<ToastService>();
 
 WebAssemblyHost host = builder.Build();
+
+// LEARN: JS interop already works here, before RunAsync: the .NET runtime was started by blazor.webassembly.js, so
+// the browser and its APIs are right there. Connectivity starts first, so the first sync run knows whether to bother.
+await host.Services.GetRequiredService<IConnectivityService>().StartAsync(CancellationToken.None);
 
 // Start syncing as soon as the app starts: send anything left over from the last session.
 host.Services.GetRequiredService<SyncScheduler>().Start();

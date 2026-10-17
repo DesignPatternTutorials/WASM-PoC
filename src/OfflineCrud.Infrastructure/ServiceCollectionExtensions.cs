@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
+using OfflineCrud.Application.Common;
+using OfflineCrud.Application.Connectivity;
 using OfflineCrud.Application.Products;
 using OfflineCrud.Application.Sync;
+using OfflineCrud.Infrastructure.Connectivity;
 using OfflineCrud.Infrastructure.DummyJson;
 using OfflineCrud.Infrastructure.IndexedDb;
 
@@ -19,20 +22,26 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(productApiBaseAddress);
 
+        services.AddSingleton<BrowserConnectivityService>();
+        services.AddSingleton<IConnectivityService>(provider => provider.GetRequiredService<BrowserConnectivityService>());
+        services.AddTransient<ConnectivityHandler>();
+
         // LEARN: On the server, IHttpClientFactory exists mainly to pool sockets and avoid exhausting them.
-        // In the browser there are no sockets to manage, because every request is a fetch() call. It's used
-        // here for central configuration and the handler pipeline, so a later phase can slot in a
-        // DelegatingHandler (for example, one that simulates being offline) without touching the client.
+        // In the browser there are no sockets to manage, because every request is a fetch() call. It's used here for
+        // central configuration and the handler pipeline: ConnectivityHandler sits in front of every DummyJSON request
+        // without the API client knowing about it.
         services.AddHttpClient<IProductApiClient, DummyJsonProductApiClient>(client =>
-        {
-            client.BaseAddress = productApiBaseAddress;
-            client.Timeout = TimeSpan.FromSeconds(15);
-        });
+            {
+                client.BaseAddress = productApiBaseAddress;
+                client.Timeout = TimeSpan.FromSeconds(15);
+            })
+            .AddHttpMessageHandler<ConnectivityHandler>();
 
         // Singletons: one JS module import for the app's lifetime, shared by the products and the outbox.
         services.AddSingleton<IndexedDbModule>();
         services.AddSingleton<IProductRepository, IndexedDbProductRepository>();
         services.AddSingleton<IOutboxStore, IndexedDbOutboxStore>();
+        services.AddSingleton<ILocalDatabase, IndexedDbLocalDatabase>();
 
         return services;
     }

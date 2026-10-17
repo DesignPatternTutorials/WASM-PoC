@@ -1,0 +1,46 @@
+@* A full-width banner whenever the app isn't online, saying which kind of offline it is and what still works. *@
+@implements IDisposable
+@inject IConnectivityService Connectivity
+
+@if (Connectivity.Status != ConnectivityStatus.Online)
+{
+    <div class="connectivity-banner @CssClass" role="status" aria-live="polite">
+        <div class="container d-flex flex-wrap align-items-center gap-2 py-2 small">
+            <i class="bi @Icon" aria-hidden="true"></i>
+            <span class="fw-semibold">@Title</span>
+            <span>Your changes are saved on this device and will sync when the connection is back.</span>
+            @if (Connectivity.IsSimulatingOffline)
+            {
+                <button type="button" class="btn btn-sm btn-light ms-auto" @onclick="() => Connectivity.SetSimulatedOffline(false)">
+                    Go back online
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private string Title => Connectivity.Status switch
+    {
+        ConnectivityStatus.SimulatedOffline => "Simulated offline: the app is blocking its own requests.",
+        ConnectivityStatus.Offline => "You're offline.",
+        _ => "DummyJSON can't be reached.",
+    };
+
+    private string Icon => Connectivity.Status switch
+    {
+        ConnectivityStatus.SimulatedOffline => "bi-toggle-off",
+        ConnectivityStatus.Offline => "bi-wifi-off",
+        _ => "bi-cloud-slash",
+    };
+
+    private string CssClass => Connectivity.Status == ConnectivityStatus.SimulatedOffline
+        ? "connectivity-banner-simulated"
+        : "connectivity-banner-offline";
+
+    protected override void OnInitialized() => Connectivity.Changed += OnChanged;
+
+    public void Dispose() => Connectivity.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+}

@@ -3,6 +3,8 @@
 @inject IProductService ProductService
 @inject NavigationManager Navigation
 @inject SyncScheduler Scheduler
+@inject IConnectivityService Connectivity
+@inject ToastService Toasts
 
 <PageTitle>Products · Offline CRUD</PageTitle>
 
@@ -15,14 +17,6 @@
         <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New product
     </a>
 </div>
-
-@if (_notice is not null)
-{
-    <div class="alert alert-success alert-dismissible" role="status">
-        <i class="bi bi-check-circle me-1" aria-hidden="true"></i>@_notice
-        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _notice = null"></button>
-    </div>
-}
 
 @* Blazor calls preventDefault on a form's submit event when @onsubmit is handled, so the page doesn't reload. *@
 <form class="mb-3" role="search" @onsubmit="Search">
@@ -176,9 +170,9 @@ else
     private ProductSearchResult? _searchResult;
     private int _loadVersion;
     private string? _searchText;
-    private string? _notice;
 
     private bool _refreshing;
+    private bool _wasOnline;
     private RefreshResult? _refreshResult;
     private DateTimeOffset? _lastRefreshed;
 
@@ -279,7 +273,7 @@ else
 
     private void Search()
     {
-        _notice = null;
+
         string? query = string.IsNullOrWhiteSpace(_searchText) ? null : _searchText.Trim();
         Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
         {
@@ -301,7 +295,9 @@ else
 
     protected override void OnInitialized()
     {
+        _wasOnline = Connectivity.IsOnline;
         Scheduler.Changed += OnSyncChanged;
+        Connectivity.Changed += OnConnectivityChanged;
     }
 
     protected override void Dispose(bool disposing)
@@ -309,9 +305,26 @@ else
         if (disposing)
         {
             Scheduler.Changed -= OnSyncChanged;
+            Connectivity.Changed -= OnConnectivityChanged;
         }
 
         base.Dispose(disposing);
+    }
+
+    // Back online: the saved copy may be stale, so revalidate it now rather than on the next visit.
+    private void OnConnectivityChanged()
+    {
+        bool online = Connectivity.IsOnline;
+        if (online && !_wasOnline && !IsSearching)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                await RefreshAsync(force: true);
+                StateHasChanged();
+            });
+        }
+
+        _wasOnline = online;
     }
 
     // A finished sync run may have changed sync states (badges) and server ids, so re-read the page that's showing.
@@ -355,7 +368,7 @@ else
         {
             // Local-first: this only touches IndexedDB, so it works offline. The outbox sends the delete later.
             await ProductService.DeleteAsync(product.Id, ComponentToken);
-            _notice = $"Deleted “{product.Details.Title}” on this device. The delete will be sent to DummyJSON in the background.";
+            Toasts.Show($"Deleted “{product.Details.Title}” on this device. The delete will sync in the background.", ToastKind.Success);
             _pendingDelete = null;
 
             if (IsSearching)

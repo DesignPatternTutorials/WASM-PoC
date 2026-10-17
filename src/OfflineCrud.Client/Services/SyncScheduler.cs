@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using OfflineCrud.Application.Connectivity;
 using OfflineCrud.Application.Sync;
 
 namespace OfflineCrud.Client.Services;
@@ -8,6 +9,7 @@ namespace OfflineCrud.Client.Services;
 /// </summary>
 /// <remarks>
 /// <para>Runs happen at start-up, after every local write (via <see cref="RequestSync"/>), when "Sync now" is pressed,
+/// when the connection comes back,
 /// every <see cref="Interval"/> while the app is open, and when the earliest backed-off entry falls due. One loop does
 /// all the running, so runs never overlap.</para>
 /// <para>
@@ -24,6 +26,7 @@ public sealed class SyncScheduler : ISyncTrigger, IAsyncDisposable
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
     private readonly ISyncService _syncService;
+    private readonly IConnectivityService _connectivity;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SyncScheduler> _logger;
     private readonly CancellationTokenSource _stopping = new();
@@ -33,20 +36,34 @@ public sealed class SyncScheduler : ISyncTrigger, IAsyncDisposable
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 
     private Task? _loop;
+    private bool _wasOnline;
 
     /// <summary>Creates the scheduler. Call <see cref="Start"/> once the app has started.</summary>
-    public SyncScheduler(ISyncService syncService, TimeProvider timeProvider, ILogger<SyncScheduler> logger)
+    public SyncScheduler(ISyncService syncService, IConnectivityService connectivity, TimeProvider timeProvider, ILogger<SyncScheduler> logger)
     {
         _syncService = syncService;
+        _connectivity = connectivity;
         _timeProvider = timeProvider;
         _logger = logger;
+
+        _wasOnline = connectivity.IsOnline;
+        connectivity.Changed += OnConnectivityChanged;
     }
 
     /// <summary>Raised whenever <see cref="IsRunning"/>, <see cref="LastResult"/> or <see cref="Outbox"/> changes.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised after every completed run that actually ran, with its result. For notifications.</summary>
+    public event Action<SyncRunResult>? RunCompleted;
+
     /// <summary>Whether a run is in progress.</summary>
     public bool IsRunning { get; private set; }
+
+    /// <summary>
+    /// Whether the last run was skipped because the app is offline. Nothing is sent while offline: the requests would
+    /// only fail, and each failure would push the entry's next retry further away.
+    /// </summary>
+    public bool PausedOffline { get; private set; }
 
     /// <summary>What the last completed run did, or <see langword="null"/> before the first one.</summary>
     public SyncRunResult? LastResult { get; private set; }
@@ -75,6 +92,7 @@ public sealed class SyncScheduler : ISyncTrigger, IAsyncDisposable
     /// <summary>Stops the loop.</summary>
     public async ValueTask DisposeAsync()
     {
+        _connectivity.Changed -= OnConnectivityChanged;
         await _stopping.CancelAsync();
         if (_loop is not null)
         {
@@ -142,14 +160,34 @@ public sealed class SyncScheduler : ISyncTrigger, IAsyncDisposable
         return untilDue < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : untilDue > Interval ? Interval : untilDue;
     }
 
+    // Back online (or "Simulate offline" switched off): send whatever queued up meanwhile, straight away.
+    private void OnConnectivityChanged()
+    {
+        bool online = _connectivity.IsOnline;
+        if (online && !_wasOnline)
+        {
+            RequestSync();
+        }
+
+        _wasOnline = online;
+    }
+
     private async Task RunOnceAsync(CancellationToken stoppingToken)
     {
-        IsRunning = true;
+        // Offline for certain (the browser says so, or the user is simulating it): don't send anything. "Unreachable"
+        // still runs, because only a real request can tell when the server is back.
+        PausedOffline = _connectivity.Status is ConnectivityStatus.Offline or ConnectivityStatus.SimulatedOffline;
+
+        IsRunning = !PausedOffline;
         Changed?.Invoke();
         try
         {
-            LastResult = await _syncService.RunAsync(stoppingToken);
-            LastError = null;
+            if (!PausedOffline)
+            {
+                LastResult = await _syncService.RunAsync(stoppingToken);
+                LastError = null;
+                RunCompleted?.Invoke(LastResult);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

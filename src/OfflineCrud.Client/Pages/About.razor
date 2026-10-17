@@ -32,7 +32,7 @@
                     <div class="col-sm-6">
                         <div class="layer layer-infrastructure h-100">
                             <span class="layer-label">Infrastructure</span>
-                            <p class="small mb-0">HttpClient for DummyJSON, and IndexedDB through a hand-written JS module. Later: connectivity via JS events.</p>
+                            <p class="small mb-0">HttpClient for DummyJSON, IndexedDB through a hand-written JS module, and connectivity from the browser's online/offline events.</p>
                         </div>
                     </div>
                     <div class="col-12">
@@ -153,7 +153,7 @@
         new(1, "Online-only CRUD", "Every page works straight against DummyJSON. The \"before\" picture.", Done: true),
         new(2, "IndexedDB local store", "A hand-written JS module, a local repository, stale-while-revalidate reads.", Done: true),
         new(3, "Outbox + sync engine", "Transactional local writes, ordered sync, retries with backoff, coalescing.", Done: true),
-        new(4, "Connectivity + UX", "Online/offline detection, a simulate-offline switch, pending badges, the sync page.", Done: false),
+        new(4, "Connectivity + UX", "Online/offline detection, a simulate-offline switch, pending badges, the sync page.", Done: true),
         new(5, "PWA app shell", "Service worker caching and an offline start-up test on a published build.", Done: false),
         new(6, "Polish", "Component tests, accessibility pass, finished learning notes.", Done: false),
     ];
