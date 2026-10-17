@@ -1,0 +1,66 @@
+@* Offers to switch to a newly published version once its service worker has installed. Only ever appears in a
+   published build: under `dotnet run` the no-op service worker never changes. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@if (_updateAvailable)
+{
+    <div class="update-banner" role="status" aria-live="polite">
+        <div class="container d-flex flex-wrap align-items-center gap-2 py-2 small">
+            <i class="bi bi-stars" aria-hidden="true"></i>
+            <span>A new version of the app is available.</span>
+            <button type="button" class="btn btn-sm btn-light ms-auto" disabled="@_applying" @onclick="ApplyAsync">
+                Reload to update
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<UpdateBanner>? _selfReference;
+    private bool _updateAvailable;
+    private bool _applying;
+
+    /// <summary>Called from <c>pwa.js</c> when an updated service worker is installed and waiting.</summary>
+    [JSInvokable]
+    public void OnUpdateAvailable()
+    {
+        _updateAvailable = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/pwa.js");
+        _selfReference = DotNetObjectReference.Create(this);
+        await _module.InvokeVoidAsync("watchForUpdate", _selfReference);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            await _module.DisposeAsync();
+        }
+
+        _selfReference?.Dispose();
+    }
+
+    private async Task ApplyAsync()
+    {
+        _applying = true;
+
+        // The page reloads when the new worker takes over, so there's nothing to do afterwards. Any unsent changes are
+        // safe: they're in IndexedDB, which an app update doesn't touch.
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("applyUpdate");
+        }
+    }
+}
