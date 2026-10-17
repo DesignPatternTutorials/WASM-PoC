@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
 
-- **Done:** Phase 0 (scaffold), Phase 1 (online-only CRUD), Phase 2 (IndexedDB local store), Phase 3 (outbox + sync engine), Phase 4 (connectivity + UX), Phase 5 (PWA / app shell offline).
-- **Next:** Phase 6 (polish: bUnit tests, accessibility, finish `LEARNING.md` and `interview-notes.md`).
+- **Done:** all phases, 0–6 (scaffold, online-only CRUD, IndexedDB store, outbox + sync, connectivity + UX, PWA app shell, polish).
+- **Not started:** the spec's "ask before doing" items (a real ASP.NET Core API in place of DummyJSON; a GitHub Actions workflow). Ask before starting either.
 
 Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge. When a phase is finished, also mark it done in the `Milestones` array in `src/OfflineCrud.Client/Pages/About.razor` and update the phase note on `Pages/Home.razor`.
 
@@ -38,6 +38,7 @@ Clean Architecture. Dependencies point inward only:
 - `OfflineCrud.Client`: Blazor WASM (PWA template). UI plus the DI **composition root**. It references Infrastructure *only* so `Program.cs` can register implementations. Pages and components depend on Application interfaces, never on Infrastructure types.
 - `tests/OfflineCrud.Application.Tests`: NUnit + Moq. Covers Domain and Application. `ArchitectureTests` enforce the layering on compiled assemblies.
 - `tests/OfflineCrud.Infrastructure.Tests`: NUnit. Tests `DummyJsonProductApiClient` against `StubHttpMessageHandler` (no network). Reaches internals via `InternalsVisibleTo`.
+- `tests/OfflineCrud.Client.Tests`: bUnit 2 (`BunitContext`, `Render<T>`) + NUnit + Moq. Derive from `ComponentTestBase` (Loose JS interop, disposed per test). Use `AppServices` to register mocked `IProductService`/`ISyncService`, `FakeConnectivityService`, and the real `SyncScheduler`/`ToastService`. Dispose the scheduler in `[TearDown]`. Use `WaitForAssertion` for anything rendered after an `await`.
 
 How a request flows: a page (inheriting `CancellableComponentBase`, which cancels on dispose) calls `IProductService`. That calls `IProductRepository` (IndexedDB) for reads and `IProductApiClient` (DummyJSON) for refreshes and writes.
 
@@ -105,7 +106,8 @@ This is a learning project, so explanations are part of the deliverable:
 
 - Mark every WASM-specific or offline-specific decision with a `// LEARN:` comment (`<!-- LEARN: -->` in XML/HTML), so `grep -rn "LEARN:"` finds every lesson.
 - Use XML doc comments on public types and members. `GenerateDocumentationFile` is on for Domain, Application and Infrastructure, so missing docs fail the build.
-- Add a section to `docs/LEARNING.md` for each phase: what was built, concepts, gotchas, things to try. Keep it accurate to the code.
+- Add a section to `docs/LEARNING.md` for each phase: what was built, concepts, gotchas, things to try. Keep it accurate to the code. Each section describes its own phase; when a later change supersedes something, add a "Later: …" note there rather than rewriting history. The phase-commit table at the top of `LEARNING.md` lets readers check out each stage.
+- `docs/interview-notes.md` holds condensed talking points. Update it when a change alters one of its claims.
 
 ## Git workflow
 
