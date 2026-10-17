@@ -1,0 +1,278 @@
+@page "/products"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+@inject NavigationManager Navigation
+
+<PageTitle>Products · Offline CRUD</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Products</h1>
+        <p class="text-body-secondary mb-0">@Summary</p>
+    </div>
+    <a href="products/new" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New product
+    </a>
+</div>
+
+@if (_notice is not null)
+{
+    <div class="alert alert-success alert-dismissible" role="status">
+        <i class="bi bi-check-circle me-1" aria-hidden="true"></i>@_notice
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _notice = null"></button>
+    </div>
+}
+
+@* Blazor calls preventDefault on a form's submit event when @onsubmit is handled, so the page doesn't reload. *@
+<form class="mb-4" role="search" @onsubmit="Search">
+    <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search" aria-hidden="true"></i></span>
+        <input type="search" class="form-control" placeholder="Search by title, brand or category"
+               aria-label="Search products" @bind="_searchText" />
+        <button class="btn btn-primary" type="submit">Search</button>
+        @if (!string.IsNullOrWhiteSpace(Query))
+        {
+            <button class="btn btn-outline-secondary" type="button" @onclick="ClearSearch">Clear</button>
+        }
+    </div>
+</form>
+
+<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
+
+@if (_loading && _page is null)
+{
+    <LoadingIndicator Text="Loading products…" />
+}
+else if (_page is not null)
+{
+    @if (_page.Items.Count == 0)
+    {
+        <div class="text-center py-5 text-body-secondary">
+            <i class="bi bi-inbox display-5 d-block mb-3" aria-hidden="true"></i>
+            @if (!string.IsNullOrWhiteSpace(Query))
+            {
+                <p>No products match “@Query”.</p>
+                <button type="button" class="btn btn-outline-primary" @onclick="ClearSearch">Show all products</button>
+            }
+            else
+            {
+                <p>There are no products on this page.</p>
+                <button type="button" class="btn btn-outline-primary" @onclick="() => GoToPage(1)">Go to the first page</button>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table table-hover table-products mb-0 @(_loading ? "opacity-50" : null)" aria-busy="@_loading">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="ps-3">Product</th>
+                            <th scope="col" class="d-none d-md-table-cell">Category</th>
+                            <th scope="col" class="text-end">Price</th>
+                            <th scope="col" class="text-end d-none d-sm-table-cell">Stock</th>
+                            <th scope="col" class="text-end pe-3"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (Product product in _page.Items)
+                        {
+                            <tr @key="product.Id">
+                                <td class="ps-3">
+                                    <div class="d-flex align-items-center gap-3">
+                                        <ProductThumbnail Url="product.ThumbnailUrl" />
+                                        <div>
+                                            <a href="products/@product.Id" class="fw-semibold text-decoration-none">@product.Details.Title</a>
+                                            @if (product.Details.Brand is not null)
+                                            {
+                                                <div class="small text-body-secondary">@product.Details.Brand</div>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="d-none d-md-table-cell">
+                                    <span class="badge rounded-pill bg-body-tertiary text-body border">@Formatting.Category(product.Details.Category)</span>
+                                </td>
+                                <td class="text-end text-nowrap">@Formatting.Price(product.Details.Price)</td>
+                                <td class="text-end d-none d-sm-table-cell">
+                                    @if (product.IsInStock)
+                                    {
+                                        @product.Details.Stock
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-danger">Out of stock</span>
+                                    }
+                                </td>
+                                <td class="text-end pe-3 text-nowrap">
+                                    <a href="products/@product.Id/edit" class="btn btn-sm btn-outline-secondary" title="Edit">
+                                        <i class="bi bi-pencil" aria-hidden="true"></i><span class="visually-hidden">Edit @product.Details.Title</span>
+                                    </a>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" @onclick="() => AskToDelete(product)">
+                                        <i class="bi bi-trash" aria-hidden="true"></i><span class="visually-hidden">Delete @product.Details.Title</span>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+            <span class="small text-body-secondary">Page @_page.PageNumber of @_page.PageCount</span>
+            <Pager PageNumber="_page.PageNumber" PageCount="_page.PageCount" OnPageSelected="GoToPage" />
+        </div>
+    }
+}
+
+<ConfirmDialog IsOpen="_pendingDelete is not null" Title="Delete product?" ConfirmText="Delete"
+               ConfirmButtonClass="btn-danger" IsBusy="_deleting" OnConfirm="DeleteAsync" OnCancel="CancelDelete">
+    <p>Delete <strong>@_pendingDelete?.Details.Title</strong>? This can't be undone.</p>
+    <ApiErrorAlert Error="_deleteError" />
+</ConfirmDialog>
+
+@code {
+    private const int PageSize = 10;
+
+    private PagedResult<Product>? _page;
+    private ApiException? _loadError;
+    private bool _loading;
+    private int _loadVersion;
+    private string? _searchText;
+    private string? _notice;
+
+    private Product? _pendingDelete;
+    private bool _deleting;
+    private ApiException? _deleteError;
+
+    /// <summary>1-based page number from the <c>?page=</c> query string.</summary>
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageNumber { get; set; }
+
+    /// <summary>Search text from the <c>?q=</c> query string.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
+    private string Summary => _page switch
+    {
+        null => "Browse, search and edit the DummyJSON catalogue.",
+        _ when !string.IsNullOrWhiteSpace(Query) => $"{_page.TotalCount} results for “{Query}”",
+        _ => $"{_page.TotalCount} products",
+    };
+
+    // Paging and search are kept in the URL, so the browser's Back button and bookmarks work as expected.
+    protected override async Task OnParametersSetAsync()
+    {
+        _searchText = Query;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        // Several loads can overlap (e.g. fast clicks on the pager). Only the latest one may update the page.
+        int version = ++_loadVersion;
+        _loading = true;
+        _loadError = null;
+
+        try
+        {
+            int page = Math.Max(1, PageNumber ?? 1);
+            PagedResult<Product> result = await ProductService.GetPageAsync(Query, (page - 1) * PageSize, PageSize, ComponentToken);
+            if (version == _loadVersion)
+            {
+                _page = result;
+            }
+        }
+        catch (ApiException ex)
+        {
+            if (version == _loadVersion)
+            {
+                _loadError = ex;
+                _page = null;
+            }
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+            // The user left the page; nothing to update.
+        }
+        finally
+        {
+            if (version == _loadVersion)
+            {
+                _loading = false;
+            }
+        }
+    }
+
+    private void Search()
+    {
+        _notice = null;
+        string? query = string.IsNullOrWhiteSpace(_searchText) ? null : _searchText.Trim();
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["q"] = query,
+            ["page"] = null,
+        }));
+    }
+
+    private void ClearSearch()
+    {
+        _searchText = null;
+        Search();
+    }
+
+    private void GoToPage(int page)
+    {
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 1 ? null : page));
+    }
+
+    private void AskToDelete(Product product)
+    {
+        _pendingDelete = product;
+        _deleteError = null;
+    }
+
+    private void CancelDelete()
+    {
+        _pendingDelete = null;
+        _deleteError = null;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_pendingDelete is not { } product || _page is null)
+        {
+            return;
+        }
+
+        _deleting = true;
+        _deleteError = null;
+        try
+        {
+            await ProductService.DeleteAsync(product.Id, ComponentToken);
+
+            // Remove the row from what is on screen. DummyJSON doesn't really delete anything, so the
+            // product comes back on the next reload. That's the behaviour Phase 2's local store fixes.
+            _page = _page with
+            {
+                Items = [.. _page.Items.Where(item => item.Id != product.Id)],
+                TotalCount = _page.TotalCount - 1,
+            };
+            _notice = $"Deleted “{product.Details.Title}”. DummyJSON doesn't persist deletes, so it will reappear when the list reloads.";
+            _pendingDelete = null;
+        }
+        catch (ApiException ex)
+        {
+            _deleteError = ex;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}

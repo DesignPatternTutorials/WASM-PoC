@@ -1,0 +1,104 @@
+@page "/products/new"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+
+<PageTitle>New product · Offline CRUD</PageTitle>
+
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="products">Products</a></li>
+        <li class="breadcrumb-item active" aria-current="page">New</li>
+    </ol>
+</nav>
+
+<div class="page-header">
+    <h1>New product</h1>
+</div>
+
+@if (_created is not null)
+{
+    <div class="card">
+        <div class="card-body p-4">
+            <h2 class="h5"><i class="bi bi-check-circle text-success me-2" aria-hidden="true"></i>Created “@_created.Details.Title”</h2>
+            <p>DummyJSON answered <code>201 Created</code> and assigned id <strong>@_created.Id</strong>.</p>
+            <div class="alert alert-info small mb-4" role="note">
+                <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
+                DummyJSON doesn't store new products, and it gives every one the same id, so this product won't appear in
+                the list and <a href="products/@_created.Id">its detail page</a> will say it doesn't exist. Phase 2 fixes this
+                with a local store and a locally generated id.
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-primary" @onclick="StartAnother">
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create another
+                </button>
+                <a href="products" class="btn btn-outline-secondary">Back to products</a>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <ApiErrorAlert Error="_categoriesError" OnRetry="LoadCategoriesAsync" />
+    <ApiErrorAlert Error="_saveError" />
+
+    <div class="card">
+        <div class="card-body p-4">
+            <ProductForm Model="_model" Categories="_categories" IsSaving="_saving" SubmitText="Create product"
+                         OnValidSubmit="CreateAsync" />
+        </div>
+    </div>
+}
+
+@code {
+    private ProductFormModel _model = new();
+    private IReadOnlyList<string> _categories = [];
+    private ApiException? _categoriesError;
+    private ApiException? _saveError;
+    private bool _saving;
+    private Product? _created;
+
+    protected override Task OnInitializedAsync() => LoadCategoriesAsync();
+
+    private async Task LoadCategoriesAsync()
+    {
+        _categoriesError = null;
+        try
+        {
+            _categories = await ProductService.GetCategoriesAsync(ComponentToken);
+        }
+        catch (ApiException ex)
+        {
+            _categoriesError = ex;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task CreateAsync(ProductFormModel model)
+    {
+        _saving = true;
+        _saveError = null;
+        try
+        {
+            _created = await ProductService.CreateAsync(model.ToDetails(), ComponentToken);
+        }
+        catch (ApiException ex)
+        {
+            _saveError = ex;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void StartAnother()
+    {
+        _created = null;
+        _model = new ProductFormModel();
+    }
+}

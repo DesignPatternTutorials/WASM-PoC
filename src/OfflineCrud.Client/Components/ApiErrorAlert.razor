@@ -1,0 +1,48 @@
+@* Explains a failed API call in plain language. Network failures get extra detail, because that is the
+   failure this project exists to fix. *@
+
+@if (Error is not null)
+{
+    <div class="alert @(IsNetwork ? "alert-warning" : "alert-danger") d-flex gap-3" role="alert">
+        <i class="bi @(IsNetwork ? "bi-wifi-off" : "bi-exclamation-octagon") fs-4" aria-hidden="true"></i>
+        <div>
+            <div class="fw-semibold">@Title</div>
+            <div>@Error.Message</div>
+            @if (IsNetwork)
+            {
+                <div class="small mt-2">
+                    This version of the app is online-only, so with no connection it has nothing to show and nowhere
+                    to save your changes. Later phases keep a local copy in IndexedDB so this page still works offline.
+                </div>
+            }
+            @if (OnRetry.HasDelegate)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-2" @onclick="OnRetry">
+                    <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Try again
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The failure to show, or <see langword="null"/> to render nothing.</summary>
+    [Parameter]
+    public ApiException? Error { get; set; }
+
+    /// <summary>When set, a "Try again" button invokes this callback.</summary>
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    private bool IsNetwork => Error?.Kind == ApiFailureKind.Network;
+
+    private string Title => Error?.Kind switch
+    {
+        ApiFailureKind.Network => "You appear to be offline",
+        ApiFailureKind.RateLimited => "Too many requests. Wait a moment and try again",
+        ApiFailureKind.Server => "The server had a problem",
+        ApiFailureKind.NotFound => "The server couldn't find that product",
+        ApiFailureKind.Rejected => "The server rejected the request",
+        _ => "The server sent an unexpected response",
+    };
+}

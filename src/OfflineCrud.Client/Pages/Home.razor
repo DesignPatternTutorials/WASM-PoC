@@ -1,7 +1,82 @@
 ﻿@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Offline CRUD</PageTitle>
 
-<h1>Hello, world!</h1>
+<section class="hero mb-5">
+    <p class="text-uppercase small fw-semibold mb-2 opacity-75">Blazor WebAssembly · Learning project</p>
+    <h1 class="display-5 fw-bold mb-3">A CRUD app that keeps working when the network doesn't</h1>
+    <p class="lead mb-4">
+        A product catalogue that runs entirely in your browser. Edits are saved locally first, queued in an outbox,
+        and synced to the API whenever a connection is available.
+    </p>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="products" class="btn btn-light btn-lg">
+            <i class="bi bi-box-seam me-1" aria-hidden="true"></i>Browse products
+        </a>
+        <a href="about" class="btn btn-outline-light btn-lg">How it works</a>
+    </div>
+</section>
 
-Welcome to your new app.
+<h2 class="h4 mb-3">What this project demonstrates</h2>
+<div class="row g-4 mb-5">
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <span class="feature-icon mb-3"><i class="bi bi-browser-chrome" aria-hidden="true"></i></span>
+                <h3 class="h6">.NET in the browser</h3>
+                <p class="small text-body-secondary mb-0">
+                    The whole app, including its C# business logic, is downloaded and runs on WebAssembly.
+                    There's no server connection like Blazor Server's to lean on.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <span class="feature-icon mb-3"><i class="bi bi-database" aria-hidden="true"></i></span>
+                <h3 class="h6">Local-first storage</h3>
+                <p class="small text-body-secondary mb-0">
+                    IndexedDB holds the data the UI shows, so lists and edits work without a connection.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <span class="feature-icon mb-3"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></span>
+                <h3 class="h6">Outbox and sync</h3>
+                <p class="small text-body-secondary mb-0">
+                    Each change is recorded in an outbox and replayed in order, with retries and backoff,
+                    once the app is back online.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <span class="feature-icon mb-3"><i class="bi bi-layers" aria-hidden="true"></i></span>
+                <h3 class="h6">Clean Architecture</h3>
+                <p class="small text-body-secondary mb-0">
+                    Domain and use cases know nothing about the browser. IndexedDB, HTTP and JS interop sit at the edges.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body d-flex flex-column flex-md-row gap-3 align-items-md-center">
+        <i class="bi bi-cone-striped fs-2 text-warning" aria-hidden="true"></i>
+        <div class="flex-grow-1">
+            <h2 class="h6 mb-1">Built in phases</h2>
+            <p class="small text-body-secondary mb-0">
+                This build is Phase 1: online-only CRUD straight against the API. Try the products page with your
+                network turned off (DevTools → Network → Offline) to see the problem the later phases solve.
+            </p>
+        </div>
+        <a href="about#roadmap" class="btn btn-outline-primary text-nowrap">See the roadmap</a>
+    </div>
+</div>

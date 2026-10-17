@@ -1,0 +1,124 @@
+@page "/products/{Id:int}/edit"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+
+<PageTitle>Edit @(_title ?? "product") · Offline CRUD</PageTitle>
+
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="products">Products</a></li>
+        <li class="breadcrumb-item"><a href="products/@Id">@(_title ?? $"#{Id}")</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Edit</li>
+    </ol>
+</nav>
+
+<div class="page-header">
+    <h1>Edit product</h1>
+</div>
+
+<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
+
+@if (_loading)
+{
+    <LoadingIndicator Text="Loading product…" />
+}
+else if (_model is not null)
+{
+    @if (_saved is not null)
+    {
+        <div class="alert alert-success" role="status">
+            <div class="fw-semibold"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Saved</div>
+            DummyJSON answered <code>200 OK</code> and echoed back “@_saved.Details.Title” at @Formatting.Price(_saved.Details.Price).
+            It doesn't persist changes, so <a href="products/@Id" class="alert-link">the detail page</a> will still show the original values.
+        </div>
+    }
+
+    <ApiErrorAlert Error="_saveError" />
+
+    <div class="card">
+        <div class="card-body p-4">
+            <ProductForm Model="_model" Categories="_categories" IsSaving="_saving" SubmitText="Save changes"
+                         CancelHref="@($"products/{Id}")" OnValidSubmit="SaveAsync" />
+        </div>
+    </div>
+}
+else if (_loadError is null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-question-circle display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
+        <h2 class="h4">Product not found</h2>
+        <p class="text-body-secondary">DummyJSON has no product #@Id.</p>
+        <a href="products" class="btn btn-outline-primary">Back to products</a>
+    </div>
+}
+
+@code {
+    private ProductFormModel? _model;
+    private string? _title;
+    private IReadOnlyList<string> _categories = [];
+    private ApiException? _loadError;
+    private ApiException? _saveError;
+    private bool _loading = true;
+    private bool _saving;
+    private Product? _saved;
+
+    /// <summary>The product's id from the route.</summary>
+    [Parameter]
+    public int Id { get; set; }
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            // Start both requests before awaiting either, so they run in parallel. The browser sends both fetches
+            // at once, even though .NET in WebAssembly runs on a single thread.
+            Task<Product?> productTask = ProductService.GetAsync(Id, ComponentToken);
+            Task<IReadOnlyList<string>> categoriesTask = ProductService.GetCategoriesAsync(ComponentToken);
+
+            Product? product = await productTask;
+            _categories = await categoriesTask;
+
+            _title = product?.Details.Title;
+            _model = product is null ? null : ProductFormModel.From(product.Details);
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex;
+            _model = null;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAsync(ProductFormModel model)
+    {
+        _saving = true;
+        _saveError = null;
+        _saved = null;
+        try
+        {
+            _saved = await ProductService.UpdateAsync(Id, model.ToDetails(), ComponentToken);
+            _title = _saved.Details.Title;
+        }
+        catch (ApiException ex)
+        {
+            _saveError = ex;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

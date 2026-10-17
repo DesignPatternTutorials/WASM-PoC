@@ -1,0 +1,74 @@
+@* A Bootstrap-styled modal rendered by Blazor. Show it by setting IsOpen. *@
+
+@if (IsOpen)
+{
+    <div class="modal app-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="@_titleId"
+         @onkeydown="OnKeyDownAsync">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title fs-5" id="@_titleId">@Title</h2>
+                    <button type="button" class="btn-close" aria-label="Close" disabled="@IsBusy" @onclick="OnCancel"></button>
+                </div>
+                <div class="modal-body">
+                    @ChildContent
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" disabled="@IsBusy" @onclick="OnCancel">Cancel</button>
+                    <button type="button" class="btn @ConfirmButtonClass" disabled="@IsBusy" @onclick="OnConfirm">
+                        @if (IsBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        }
+                        @ConfirmText
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show app-modal-backdrop"></div>
+}
+
+@code {
+    private readonly string _titleId = $"dialog-{Guid.NewGuid():N}";
+
+    /// <summary>Whether the dialog is visible.</summary>
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    /// <summary>Heading text.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Body content.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Label of the confirm button.</summary>
+    [Parameter]
+    public string ConfirmText { get; set; } = "Confirm";
+
+    /// <summary>Bootstrap button class for the confirm button.</summary>
+    [Parameter]
+    public string ConfirmButtonClass { get; set; } = "btn-primary";
+
+    /// <summary>Disables the buttons and shows a spinner while the confirmed action runs.</summary>
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    /// <summary>Invoked when the user confirms.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Invoked when the user cancels, closes or presses Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape" && !IsBusy)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

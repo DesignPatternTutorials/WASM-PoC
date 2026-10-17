@@ -1,0 +1,171 @@
+@page "/products/{Id:int}"
+@inherits CancellableComponentBase
+@inject IProductService ProductService
+
+<PageTitle>@(_product?.Details.Title ?? "Product") · Offline CRUD</PageTitle>
+
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="products">Products</a></li>
+        <li class="breadcrumb-item active" aria-current="page">@(_product?.Details.Title ?? $"#{Id}")</li>
+    </ol>
+</nav>
+
+<ApiErrorAlert Error="_loadError" OnRetry="LoadAsync" />
+
+@if (_loading)
+{
+    <LoadingIndicator Text="Loading product…" />
+}
+else if (_deleted)
+{
+    <div class="card">
+        <div class="card-body p-4 text-center">
+            <i class="bi bi-trash3 display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
+            <h1 class="h4">Product deleted</h1>
+            <p class="text-body-secondary mb-4">
+                DummyJSON accepted the delete but doesn't persist it, so this product will still appear in the list.
+            </p>
+            <a href="products" class="btn btn-primary">Back to products</a>
+        </div>
+    </div>
+}
+else if (_product is not null)
+{
+    ProductDetails details = _product.Details;
+
+    <div class="card">
+        <div class="card-body p-4">
+            <div class="row g-4">
+                <div class="col-md-5 col-lg-4">
+                    <ProductThumbnail Url="_product.ThumbnailUrl" Alt="@details.Title" CssClass="product-thumb-lg" />
+                </div>
+                <div class="col-md-7 col-lg-8">
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <span class="badge rounded-pill bg-primary-subtle text-primary-emphasis">@Formatting.Category(details.Category)</span>
+                        @if (_product.IsInStock)
+                        {
+                            <span class="badge rounded-pill bg-success-subtle text-success-emphasis">In stock: @details.Stock</span>
+                        }
+                        else
+                        {
+                            <span class="badge rounded-pill bg-danger-subtle text-danger-emphasis">Out of stock</span>
+                        }
+                    </div>
+
+                    <h1 class="h2 mb-1">@details.Title</h1>
+                    @if (details.Brand is not null)
+                    {
+                        <p class="text-body-secondary mb-3">by @details.Brand</p>
+                    }
+
+                    <div class="d-flex align-items-baseline gap-2 mb-3">
+                        <span class="fs-3 fw-semibold">@Formatting.Price(_product.DiscountedPrice)</span>
+                        @if (details.DiscountPercentage > 0)
+                        {
+                            <span class="text-body-secondary text-decoration-line-through">@Formatting.Price(details.Price)</span>
+                            <span class="badge text-bg-success">−@Formatting.Percent(details.DiscountPercentage)</span>
+                        }
+                    </div>
+
+                    @if (_product.Rating is double rating)
+                    {
+                        <p class="mb-3">
+                            <i class="bi bi-star-fill text-warning" aria-hidden="true"></i>
+                            <span>@rating.ToString("0.0", CultureInfo.CurrentCulture)</span>
+                            <span class="text-body-secondary">out of 5</span>
+                        </p>
+                    }
+
+                    <p class="mb-4">@details.Description</p>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="products/@Id/edit" class="btn btn-primary">
+                            <i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit
+                        </a>
+                        <button type="button" class="btn btn-outline-danger" @onclick="() => _confirmingDelete = true">
+                            <i class="bi bi-trash me-1" aria-hidden="true"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (_loadError is null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-question-circle display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
+        <h1 class="h4">Product not found</h1>
+        <p class="text-body-secondary">DummyJSON has no product #@Id. Products you create aren't stored, so they can't be opened later.</p>
+        <a href="products" class="btn btn-outline-primary">Back to products</a>
+    </div>
+}
+
+<ConfirmDialog IsOpen="_confirmingDelete" Title="Delete product?" ConfirmText="Delete" ConfirmButtonClass="btn-danger"
+               IsBusy="_deleting" OnConfirm="DeleteAsync" OnCancel="() => _confirmingDelete = false">
+    <p>Delete <strong>@_product?.Details.Title</strong>? This can't be undone.</p>
+    <ApiErrorAlert Error="_deleteError" />
+</ConfirmDialog>
+
+@code {
+    private Product? _product;
+    private ApiException? _loadError;
+    private bool _loading = true;
+    private bool _deleted;
+
+    private bool _confirmingDelete;
+    private bool _deleting;
+    private ApiException? _deleteError;
+
+    /// <summary>The product's id from the route.</summary>
+    [Parameter]
+    public int Id { get; set; }
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            _product = await ProductService.GetAsync(Id, ComponentToken);
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex;
+            _product = null;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        _deleting = true;
+        _deleteError = null;
+        try
+        {
+            await ProductService.DeleteAsync(Id, ComponentToken);
+            _deleted = true;
+            _confirmingDelete = false;
+        }
+        catch (ApiException ex)
+        {
+            _deleteError = ex;
+        }
+        catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}
