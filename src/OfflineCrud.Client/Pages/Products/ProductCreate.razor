@@ -21,15 +21,15 @@
         <div class="card-body p-4">
             <h2 class="h5"><i class="bi bi-check-circle text-success me-2" aria-hidden="true"></i>Created “@_created.Details.Title”</h2>
             <p>
-                DummyJSON answered <code>201 Created</code> and assigned server id <strong>@_created.ServerId</strong>. The product
-                is saved on this device under its own local id, so it appears in the list and has
-                <a href="products/@_created.Id">a detail page</a>.
+                Saved on this device under local id <code>@_created.Id</code>, so it's already in the list and has
+                <a href="products/@_created.Id">a detail page</a>. The create is queued in the outbox and will be sent to
+                DummyJSON in the background. Its server id is filled in once that succeeds.
             </p>
             <div class="alert alert-info small mb-4" role="note">
                 <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
-                DummyJSON doesn't actually store new products, and gives every one the same id. That's why the local id is
-                generated here and the server id is only recorded alongside it. Editing or deleting this product will fail,
-                because DummyJSON doesn't know it.
+                DummyJSON doesn't actually store new products, and gives every one server id 195. Once this create has been
+                sent, a later edit of it will fail with a 404 and show as "Sync failed". That's the deliberate, readable
+                outcome for a server that has lost the record.
             </div>
             <div class="d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-primary" @onclick="StartAnother">
@@ -43,7 +43,6 @@
 else
 {
     <ApiErrorAlert Error="_categoriesError" OnRetry="LoadCategoriesAsync" />
-    <ApiErrorAlert Error="_saveError" />
 
     <div class="card">
         <div class="card-body p-4">
@@ -57,7 +56,6 @@ else
     private ProductFormModel _model = new();
     private IReadOnlyList<string> _categories = [];
     private ApiException? _categoriesError;
-    private ApiException? _saveError;
     private bool _saving;
     private Product? _created;
 
@@ -82,14 +80,9 @@ else
     private async Task CreateAsync(ProductFormModel model)
     {
         _saving = true;
-        _saveError = null;
         try
         {
             _created = await ProductService.CreateAsync(model.ToDetails(), ComponentToken);
-        }
-        catch (ApiException ex)
-        {
-            _saveError = ex;
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {

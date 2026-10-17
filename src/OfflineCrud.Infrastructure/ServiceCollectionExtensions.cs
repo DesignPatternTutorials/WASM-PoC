@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using OfflineCrud.Application.Products;
+using OfflineCrud.Application.Sync;
 using OfflineCrud.Infrastructure.DummyJson;
 using OfflineCrud.Infrastructure.IndexedDb;
 
@@ -28,8 +29,10 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
-        // One instance for the app's lifetime, so the JS module is imported once.
-        services.AddScoped<IProductRepository, IndexedDbProductRepository>();
+        // Singletons: one JS module import for the app's lifetime, shared by the products and the outbox.
+        services.AddSingleton<IndexedDbModule>();
+        services.AddSingleton<IProductRepository, IndexedDbProductRepository>();
+        services.AddSingleton<IOutboxStore, IndexedDbOutboxStore>();
 
         return services;
     }

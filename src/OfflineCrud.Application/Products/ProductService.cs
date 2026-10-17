@@ -1,38 +1,41 @@
 using OfflineCrud.Application.Common;
+using OfflineCrud.Application.Sync;
 using OfflineCrud.Domain.Products;
 
 namespace OfflineCrud.Application.Products;
 
 /// <summary>
-/// Phase 2 implementation of <see cref="IProductService"/>: reads come from local storage and are revalidated from
-/// the server; writes go to the server, then to local storage.
+/// The product use cases. Reads come from local storage and are revalidated from the server. Writes are local-first:
+/// the change and an outbox entry are saved together, and the sync engine sends the entry later.
 /// </summary>
-/// <remarks>
-/// What still breaks offline: creating, editing and deleting, because each write needs the server to answer first.
-/// Phase 3 replaces that with a local write plus an outbox entry.
-/// </remarks>
-public sealed class ProductService : IProductService, IDisposable
+public sealed class ProductService : IProductService
 {
     /// <summary>How long a catalogue refresh counts as fresh, so revisiting the list doesn't refetch every time.</summary>
     public static readonly TimeSpan CatalogueMaxAge = TimeSpan.FromMinutes(1);
 
     private readonly IProductApiClient _apiClient;
     private readonly IProductRepository _repository;
+    private readonly IOutboxStore _outbox;
+    private readonly LocalStoreLock _storeLock;
+    private readonly ISyncTrigger _syncTrigger;
     private readonly TimeProvider _timeProvider;
-
-    // LEARN: WebAssembly runs .NET on a single thread, but that doesn't make read-modify-write safe. Every `await`
-    // lets other work run, so a catalogue refresh could read a product, then a save could change it, then the refresh
-    // writes its stale copy back. This lock makes each read-merge-write sequence finish before the next one starts.
-    // (It only covers this tab. Two tabs share one IndexedDB database but not this lock.)
-    private readonly SemaphoreSlim _storeLock = new(1, 1);
 
     private IReadOnlyList<string>? _serverCategories;
 
     /// <summary>Creates the service.</summary>
-    public ProductService(IProductApiClient apiClient, IProductRepository repository, TimeProvider timeProvider)
+    public ProductService(
+        IProductApiClient apiClient,
+        IProductRepository repository,
+        IOutboxStore outbox,
+        LocalStoreLock storeLock,
+        ISyncTrigger syncTrigger,
+        TimeProvider timeProvider)
     {
         _apiClient = apiClient;
         _repository = repository;
+        _outbox = outbox;
+        _storeLock = storeLock;
+        _syncTrigger = syncTrigger;
         _timeProvider = timeProvider;
     }
 
@@ -169,11 +172,16 @@ public sealed class ProductService : IProductService, IDisposable
     {
         ArgumentNullException.ThrowIfNull(details);
 
-        ServerProduct created = await _apiClient.CreateAsync(details, cancellationToken);
+        // LEARN: Local-first write. No network call here: the product exists on this device as soon as the transaction
+        // commits, and works the same online or offline. The server id is filled in later, when the outbox entry is sent.
+        Product product = Product.CreateLocal(Guid.NewGuid(), details);
+        using (await _storeLock.AcquireAsync(cancellationToken))
+        {
+            OutboxPlan plan = OutboxPlanner.Plan([], OutboxOperation.Create, product.Id, details, _timeProvider.GetUtcNow(), Guid.NewGuid);
+            await CommitAsync(product, plan, cancellationToken);
+        }
 
-        // A fresh local id, never the server's: DummyJSON returns the same id for every create.
-        Product product = Product.FromServer(Guid.NewGuid(), created.ServerId, created.Details, created.Rating, created.ThumbnailUrl, created.Version);
-        await SaveLockedAsync(product, cancellationToken);
+        _syncTrigger.RequestSync();
         return product;
     }
 
@@ -181,57 +189,36 @@ public sealed class ProductService : IProductService, IDisposable
     public async Task<Product> UpdateAsync(Guid id, ProductDetails details, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(details);
-        int serverId = await GetServerIdAsync(id, cancellationToken);
 
-        ServerProduct updated = await _apiClient.UpdateAsync(serverId, details, cancellationToken);
-
-        await _storeLock.WaitAsync(cancellationToken);
-        try
+        Product product;
+        using (await _storeLock.AcquireAsync(cancellationToken))
         {
-            // Re-read inside the lock, in case a refresh changed the record while the request was in flight.
-            Product product = await GetRequiredAsync(id, cancellationToken);
+            product = await GetRequiredAsync(id, cancellationToken);
+            product.ApplyLocalEdit(details);
 
-            // DummyJSON's PUT response omits meta, so keep the version this copy was based on rather than forgetting it.
-            // Forgetting it would let the next refresh overwrite the edit with the server's unchanged copy.
-            product.ApplyServerCopy(
-                serverId,
-                updated.Details,
-                updated.Rating ?? product.Rating,
-                updated.ThumbnailUrl ?? product.ThumbnailUrl,
-                updated.Version ?? product.ServerVersion);
-            await _repository.SaveAsync([product], cancellationToken);
-            return product;
+            IReadOnlyList<OutboxEntry> queued = await _outbox.GetForEntityAsync(id, cancellationToken);
+            OutboxPlan plan = OutboxPlanner.Plan(queued, OutboxOperation.Update, id, details, _timeProvider.GetUtcNow(), Guid.NewGuid);
+            await CommitAsync(product, plan, cancellationToken);
         }
-        finally
-        {
-            _storeLock.Release();
-        }
+
+        _syncTrigger.RequestSync();
+        return product;
     }
 
     /// <inheritdoc />
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        int serverId = await GetServerIdAsync(id, cancellationToken);
-
-        await _apiClient.DeleteAsync(serverId, cancellationToken);
-
-        await _storeLock.WaitAsync(cancellationToken);
-        try
+        using (await _storeLock.AcquireAsync(cancellationToken))
         {
             Product product = await GetRequiredAsync(id, cancellationToken);
-            product.MarkDeleted();
-            await _repository.SaveAsync([product], cancellationToken);
-        }
-        finally
-        {
-            _storeLock.Release();
-        }
-    }
+            product.ApplyLocalDelete();
 
-    /// <summary>Releases the store lock.</summary>
-    public void Dispose()
-    {
-        _storeLock.Dispose();
+            IReadOnlyList<OutboxEntry> queued = await _outbox.GetForEntityAsync(id, cancellationToken);
+            OutboxPlan plan = OutboxPlanner.Plan(queued, OutboxOperation.Delete, id, payload: null, _timeProvider.GetUtcNow(), Guid.NewGuid);
+            await CommitAsync(product, plan, cancellationToken);
+        }
+
+        _syncTrigger.RequestSync();
     }
 
     private static void ValidatePaging(int skip, int take)
@@ -239,6 +226,13 @@ public sealed class ProductService : IProductService, IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(skip);
         ArgumentOutOfRangeException.ThrowIfLessThan(take, IProductService.MinPageSize);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(take, IProductService.MaxPageSize);
+    }
+
+    /// <summary>Saves the product and its outbox changes in one transaction. The caller holds the store lock.</summary>
+    private Task CommitAsync(Product product, OutboxPlan plan, CancellationToken cancellationToken)
+    {
+        product.SetSyncState(plan.SyncState);
+        return _outbox.CommitAsync([product], plan.ToSave, plan.ToDelete, cancellationToken);
     }
 
     private async Task<PagedResult<Product>> SearchDeviceAsync(string query, int skip, int take, CancellationToken cancellationToken)
@@ -250,49 +244,24 @@ public sealed class ProductService : IProductService, IDisposable
 
     private async Task<ServerCopyMergeResult> MergeAsync(IReadOnlyList<ServerProduct> serverProducts, CancellationToken cancellationToken)
     {
-        await _storeLock.WaitAsync(cancellationToken);
-        try
-        {
-            int[] serverIds = [.. serverProducts.Select(product => product.ServerId).Distinct()];
-            IReadOnlyList<Product> existing = await _repository.GetByServerIdsAsync(serverIds, cancellationToken);
+        using IDisposable _ = await _storeLock.AcquireAsync(cancellationToken);
 
-            ServerCopyMergeResult merge = ServerCopyMerger.Merge(existing, serverProducts, Guid.NewGuid);
-            if (merge.Changed.Count > 0)
-            {
-                await _repository.SaveAsync([.. merge.Changed], cancellationToken);
-            }
+        int[] serverIds = [.. serverProducts.Select(product => product.ServerId).Distinct()];
+        IReadOnlyList<Product> existing = await _repository.GetByServerIdsAsync(serverIds, cancellationToken);
 
-            return merge;
-        }
-        finally
+        // Products with queued changes aren't Synced, so ShouldAcceptServerCopy keeps the server from overwriting them.
+        ServerCopyMergeResult merge = ServerCopyMerger.Merge(existing, serverProducts, Guid.NewGuid);
+        if (merge.Changed.Count > 0)
         {
-            _storeLock.Release();
+            await _repository.SaveAsync([.. merge.Changed], cancellationToken);
         }
-    }
 
-    private async Task SaveLockedAsync(Product product, CancellationToken cancellationToken)
-    {
-        await _storeLock.WaitAsync(cancellationToken);
-        try
-        {
-            await _repository.SaveAsync([product], cancellationToken);
-        }
-        finally
-        {
-            _storeLock.Release();
-        }
+        return merge;
     }
 
     private async Task<Product> GetRequiredAsync(Guid id, CancellationToken cancellationToken)
     {
         return await GetAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Product {id} isn't stored on this device.");
-    }
-
-    private async Task<int> GetServerIdAsync(Guid id, CancellationToken cancellationToken)
-    {
-        Product product = await GetRequiredAsync(id, cancellationToken);
-        return product.ServerId
-            ?? throw new InvalidOperationException($"Product {id} has no server id, so the server can't be asked to change it.");
     }
 }

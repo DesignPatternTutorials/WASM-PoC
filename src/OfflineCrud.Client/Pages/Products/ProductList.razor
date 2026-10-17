@@ -2,6 +2,7 @@
 @inherits CancellableComponentBase
 @inject IProductService ProductService
 @inject NavigationManager Navigation
+@inject SyncScheduler Scheduler
 
 <PageTitle>Products · Offline CRUD</PageTitle>
 
@@ -67,6 +68,7 @@ else
     <FreshnessBar IsRefreshing="_refreshing" Result="_refreshResult" LastRefreshed="_lastRefreshed"
                   OnRefresh="() => RefreshAsync(force: true)" />
 }
+<SyncStatusLine />
 
 @if (_page is null)
 {
@@ -123,6 +125,7 @@ else
                                         {
                                             <div class="small text-body-secondary">@product.Details.Brand</div>
                                         }
+                                        <SyncStateBadge State="product.SyncState" />
                                     </div>
                                 </div>
                             </td>
@@ -164,7 +167,6 @@ else
 <ConfirmDialog IsOpen="_pendingDelete is not null" Title="Delete product?" ConfirmText="Delete"
                ConfirmButtonClass="btn-danger" IsBusy="_deleting" OnConfirm="DeleteAsync" OnCancel="CancelDelete">
     <p>Delete <strong>@_pendingDelete?.Details.Title</strong>? This can't be undone.</p>
-    <ApiErrorAlert Error="_deleteError" />
 </ConfirmDialog>
 
 @code {
@@ -182,7 +184,6 @@ else
 
     private Product? _pendingDelete;
     private bool _deleting;
-    private ApiException? _deleteError;
 
     /// <summary>1-based page number from the <c>?page=</c> query string.</summary>
     [SupplyParameterFromQuery(Name = "page")]
@@ -298,16 +299,48 @@ else
         Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 1 ? null : page));
     }
 
+    protected override void OnInitialized()
+    {
+        Scheduler.Changed += OnSyncChanged;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Scheduler.Changed -= OnSyncChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    // A finished sync run may have changed sync states (badges) and server ids, so re-read the page that's showing.
+    private void OnSyncChanged()
+    {
+        if (!Scheduler.IsRunning && !IsSearching)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await LoadLocalPageAsync(_loadVersion);
+                    StateHasChanged();
+                }
+                catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+                {
+                }
+            });
+        }
+    }
+
     private void AskToDelete(Product product)
     {
         _pendingDelete = product;
-        _deleteError = null;
     }
 
     private void CancelDelete()
     {
         _pendingDelete = null;
-        _deleteError = null;
     }
 
     private async Task DeleteAsync()
@@ -318,11 +351,11 @@ else
         }
 
         _deleting = true;
-        _deleteError = null;
         try
         {
+            // Local-first: this only touches IndexedDB, so it works offline. The outbox sends the delete later.
             await ProductService.DeleteAsync(product.Id, ComponentToken);
-            _notice = $"Deleted “{product.Details.Title}”. DummyJSON doesn't persist deletes, but this device remembers it, so it stays deleted here.";
+            _notice = $"Deleted “{product.Details.Title}” on this device. The delete will be sent to DummyJSON in the background.";
             _pendingDelete = null;
 
             if (IsSearching)
@@ -337,10 +370,6 @@ else
             {
                 await LoadLocalPageAsync(_loadVersion);
             }
-        }
-        catch (ApiException ex)
-        {
-            _deleteError = ex;
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {

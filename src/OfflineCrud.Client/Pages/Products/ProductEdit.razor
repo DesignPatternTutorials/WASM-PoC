@@ -27,20 +27,10 @@ else if (_model is not null)
     @if (_saved is not null)
     {
         <div class="alert alert-success" role="status">
-            <div class="fw-semibold"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Saved</div>
-            DummyJSON answered <code>200 OK</code>, and the change is saved on this device. DummyJSON itself forgets it, but a
-            refresh only replaces a product when the server's version changes, so <a href="products/@Id" class="alert-link">the
-            detail page</a> keeps showing your edit.
+            <div class="fw-semibold"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Saved on this device</div>
+            The change is queued and will be sent to DummyJSON in the background, online or as soon as you're back online.
+            Edit again before it's sent and only the latest version goes. <a href="products/@Id" class="alert-link">View the product</a>.
         </div>
-    }
-
-    <ApiErrorAlert Error="_saveError" />
-    @if (_saveError?.Kind == ApiFailureKind.NotFound)
-    {
-        <p class="small text-body-secondary">
-            DummyJSON never stored this product (it was created through its simulated API), so it can't update it either.
-            Phase 3 handles this case by marking the change as failed, with this reason, instead of losing it.
-        </p>
     }
 
     <div class="card">
@@ -65,7 +55,6 @@ else if (_loadError is null)
     private string? _title;
     private IReadOnlyList<string> _categories = [];
     private ApiException? _loadError;
-    private ApiException? _saveError;
     private bool _loading = true;
     private bool _saving;
     private Product? _saved;
@@ -110,16 +99,13 @@ else if (_loadError is null)
     private async Task SaveAsync(ProductFormModel model)
     {
         _saving = true;
-        _saveError = null;
         _saved = null;
         try
         {
+            // LEARN: Optimistic UI. The save resolves as soon as IndexedDB commits, so the confirmation shows at once,
+            // before (and whether or not) the server has heard about it.
             _saved = await ProductService.UpdateAsync(Id, model.ToDetails(), ComponentToken);
             _title = _saved.Details.Title;
-        }
-        catch (ApiException ex)
-        {
-            _saveError = ex;
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {

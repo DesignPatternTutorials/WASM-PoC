@@ -17,6 +17,7 @@ public class DummyJsonProductApiClientTests
         """;
 
     private static readonly Uri BaseAddress = new("https://dummyjson.example/");
+    private static readonly Guid Key = Guid.Parse("6f9619ff-8b86-d011-b42d-00cf4fc964ff");
 
     [Test]
     public async Task GetAllAsync_RequestsEverythingWithSelectedFieldsAndMeta()
@@ -106,7 +107,7 @@ public class DummyJsonProductApiClientTests
             """{"id":195,"title":"Widget","description":"A widget","category":"misc","price":5,"discountPercentage":0,"stock":3}""");
         ProductDetails details = new("Widget", "A widget", "misc", brand: null, price: 5m, discountPercentage: 0m, stock: 3);
 
-        ServerProduct created = await CreateClient(handler).CreateAsync(details, CancellationToken.None);
+        ServerProduct created = await CreateClient(handler).CreateAsync(details, Key, CancellationToken.None);
 
         StubHttpMessageHandler.RecordedRequest request = handler.Requests.Single();
         using JsonDocument body = JsonDocument.Parse(request.Body!);
@@ -114,6 +115,7 @@ public class DummyJsonProductApiClientTests
         {
             Assert.That(request.Method, Is.EqualTo(HttpMethod.Post));
             Assert.That(request.Uri.AbsolutePath, Is.EqualTo("/products/add"));
+            Assert.That(request.IdempotencyKey, Is.EqualTo(Key.ToString()));
             Assert.That(body.RootElement.TryGetProperty("id", out _), Is.False, "DummyJSON echoes a body id over the real one");
             Assert.That(body.RootElement.TryGetProperty("brand", out _), Is.False);
             Assert.That(body.RootElement.GetProperty("title").GetString(), Is.EqualTo("Widget"));
@@ -128,13 +130,14 @@ public class DummyJsonProductApiClientTests
     {
         StubHttpMessageHandler handler = StubHttpMessageHandler.Returning(HttpStatusCode.OK, ProductJson);
 
-        await CreateClient(handler).UpdateAsync(1, new ProductDetails("T", "D", "beauty", null, 1m, 0m, 1), CancellationToken.None);
+        await CreateClient(handler).UpdateAsync(1, new ProductDetails("T", "D", "beauty", null, 1m, 0m, 1), Key, CancellationToken.None);
 
         StubHttpMessageHandler.RecordedRequest request = handler.Requests.Single();
         Assert.Multiple(() =>
         {
             Assert.That(request.Method, Is.EqualTo(HttpMethod.Put));
             Assert.That(request.Uri.AbsolutePath, Is.EqualTo("/products/1"));
+            Assert.That(request.IdempotencyKey, Is.EqualTo(Key.ToString()));
         });
     }
 
@@ -145,7 +148,7 @@ public class DummyJsonProductApiClientTests
             HttpStatusCode.NotFound, """{"message":"Product with id '195' not found"}""");
 
         Assert.That(
-            () => CreateClient(handler).DeleteAsync(195, CancellationToken.None),
+            () => CreateClient(handler).DeleteAsync(195, Key, CancellationToken.None),
             Throws.InstanceOf<ApiException>()
                 .With.Property(nameof(ApiException.Kind)).EqualTo(ApiFailureKind.NotFound)
                 .And.Property(nameof(ApiException.StatusCode)).EqualTo(404)

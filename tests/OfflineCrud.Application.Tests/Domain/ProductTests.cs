@@ -91,7 +91,7 @@ public class ProductTests
     public void ShouldAcceptServerCopy_Tombstone_IsFalse()
     {
         Product product = FromServer(version: "v1");
-        product.MarkDeleted();
+        product.ApplyLocalDelete();
 
         Assert.That(product.ShouldAcceptServerCopy("v2"), Is.False);
     }
@@ -132,7 +132,7 @@ public class ProductTests
     {
         Product product = FromServer();
 
-        product.MarkDeleted();
+        product.ApplyLocalDelete();
 
         Assert.That(product.IsDeleted, Is.True);
     }

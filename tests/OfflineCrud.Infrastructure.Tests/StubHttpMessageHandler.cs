@@ -31,9 +31,10 @@ internal sealed class StubHttpMessageHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-        Requests.Add(new RecordedRequest(request.Method, request.RequestUri!, body));
+        string? idempotencyKey = request.Headers.TryGetValues("Idempotency-Key", out IEnumerable<string>? values) ? values.Single() : null;
+        Requests.Add(new RecordedRequest(request.Method, request.RequestUri!, body, idempotencyKey));
         return await _respond(request, cancellationToken);
     }
 
-    internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body);
+    internal sealed record RecordedRequest(HttpMethod Method, Uri Uri, string? Body, string? IdempotencyKey);
 }

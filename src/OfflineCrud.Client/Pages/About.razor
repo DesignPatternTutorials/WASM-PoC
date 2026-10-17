@@ -38,7 +38,7 @@
                     <div class="col-12">
                         <div class="layer layer-application">
                             <span class="layer-label">Application</span>
-                            <p class="small mb-3">Use cases (<code>IProductService</code>) and the ports the outer layers implement (<code>IProductApiClient</code>, <code>IProductRepository</code>).</p>
+                            <p class="small mb-3">Use cases (<code>IProductService</code>), the sync engine (<code>SyncService</code>), and the ports the outer layers implement (<code>IProductApiClient</code>, <code>IProductRepository</code>, <code>IOutboxStore</code>).</p>
                             <div class="layer layer-domain">
                                 <span class="layer-label">Domain</span>
                                 <p class="small mb-0">Products and their rules. No dependencies at all.</p>
@@ -69,7 +69,7 @@
     <p>
         A browser app has no guaranteed connection. The fix is to make the device's own storage the source of truth for
         the UI, and treat the API as somewhere changes are <em>synced to</em>, not where they're saved.
-        <span class="badge bg-primary-subtle text-primary-emphasis">Reads: Phase 2 · Writes: Phases 3–4</span>
+        <span class="badge bg-primary-subtle text-primary-emphasis">Reads: Phase 2 · Writes: Phase 3</span>
     </p>
     <ol class="row g-3 list-unstyled">
         <li class="col-md-6 col-xl-3">
@@ -152,7 +152,7 @@
         new(0, "Scaffold", "Solution, layered projects, build settings, verified API notes.", Done: true),
         new(1, "Online-only CRUD", "Every page works straight against DummyJSON. The \"before\" picture.", Done: true),
         new(2, "IndexedDB local store", "A hand-written JS module, a local repository, stale-while-revalidate reads.", Done: true),
-        new(3, "Outbox + sync engine", "Transactional local writes, ordered sync, retries with backoff, coalescing.", Done: false),
+        new(3, "Outbox + sync engine", "Transactional local writes, ordered sync, retries with backoff, coalescing.", Done: true),
         new(4, "Connectivity + UX", "Online/offline detection, a simulate-offline switch, pending badges, the sync page.", Done: false),
         new(5, "PWA app shell", "Service worker caching and an offline start-up test on a published build.", Done: false),
         new(6, "Polish", "Component tests, accessibility pass, finished learning notes.", Done: false),

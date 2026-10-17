@@ -4,9 +4,8 @@ namespace OfflineCrud.Domain.Products;
 /// Where a locally stored product stands relative to the server.
 /// </summary>
 /// <remarks>
-/// Phase 2 only produces <see cref="Synced"/>, because writes still go to the API before they're stored.
-/// The other states arrive with the outbox in Phase 3, when a change can exist on this device before
-/// the server has seen it.
+/// A change is saved on this device first and sent later by the outbox, so the local copy can be ahead of the
+/// server. The state is derived from the outbox entries still queued for the product.
 /// </remarks>
 public enum SyncState
 {

@@ -1,6 +1,7 @@
 @page "/products/{Id:guid}"
 @inherits CancellableComponentBase
 @inject IProductService ProductService
+@inject SyncScheduler Scheduler
 
 <PageTitle>@(_product?.Details.Title ?? "Product") · Offline CRUD</PageTitle>
 
@@ -22,8 +23,8 @@ else if (_deleted)
             <i class="bi bi-trash3 display-5 text-body-secondary d-block mb-3" aria-hidden="true"></i>
             <h1 class="h4">Product deleted</h1>
             <p class="text-body-secondary mb-4">
-                DummyJSON accepted the delete but doesn't persist it. This device keeps a record of the delete, so the product
-                won't come back when the catalogue is refreshed.
+                Deleted on this device. The delete is queued and will be sent to DummyJSON in the background. This device keeps
+                a record of it, so the product won't come back when the catalogue is refreshed.
             </p>
             <a href="products" class="btn btn-primary">Back to products</a>
         </div>
@@ -40,11 +41,15 @@ else if (_product is not null)
                 <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
                 <span>Saved on this device. Checking DummyJSON for updates…</span>
                 break;
+            case RefreshStatus.NotOnServer when _product.ServerId is null:
+                <i class="bi bi-cloud-arrow-up me-1" aria-hidden="true"></i>
+                <span>Created on this device. It will be sent to DummyJSON by the outbox.</span>
+                break;
             case RefreshStatus.NotOnServer:
                 <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
                 <span>
-                    Only on this device. DummyJSON doesn't store products created through it, so it has no copy
-                    @(_product.ServerId is int serverId ? $"of #{serverId}" : "of this product") to refresh from.
+                    Only on this device. DummyJSON doesn't store products created through it, so it has no copy of
+                    #@_product.ServerId to refresh from.
                 </span>
                 break;
             case RefreshStatus.Failed:
@@ -113,6 +118,8 @@ else if (_product is not null)
                     </div>
 
                     <dl class="row small text-body-secondary mt-4 mb-0">
+                        <dt class="col-sm-4 fw-normal">Sync state</dt>
+                        <dd class="col-sm-8"><SyncStateBadge State="_product.SyncState" ShowSynced="true" /></dd>
                         <dt class="col-sm-4 fw-normal">Local id</dt>
                         <dd class="col-sm-8 font-monospace">@_product.Id</dd>
                         <dt class="col-sm-4 fw-normal">Server id</dt>
@@ -138,7 +145,6 @@ else
 <ConfirmDialog IsOpen="_confirmingDelete" Title="Delete product?" ConfirmText="Delete" ConfirmButtonClass="btn-danger"
                IsBusy="_deleting" OnConfirm="DeleteAsync" OnCancel="() => _confirmingDelete = false">
     <p>Delete <strong>@_product?.Details.Title</strong>? This can't be undone.</p>
-    <ApiErrorAlert Error="_deleteError" />
 </ConfirmDialog>
 
 @code {
@@ -149,11 +155,46 @@ else
 
     private bool _confirmingDelete;
     private bool _deleting;
-    private ApiException? _deleteError;
 
     /// <summary>The product's local id from the route.</summary>
     [Parameter]
     public Guid Id { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Scheduler.Changed += OnSyncChanged;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Scheduler.Changed -= OnSyncChanged;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    // After a sync run the badge and server id may have changed, so re-read the saved copy.
+    private void OnSyncChanged()
+    {
+        if (Scheduler.IsRunning || _deleted || _product is null)
+        {
+            return;
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                _product = await ProductService.GetAsync(Id, ComponentToken) ?? _product;
+                StateHasChanged();
+            }
+            catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
+            {
+            }
+        });
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -188,16 +229,11 @@ else
     private async Task DeleteAsync()
     {
         _deleting = true;
-        _deleteError = null;
         try
         {
             await ProductService.DeleteAsync(Id, ComponentToken);
             _deleted = true;
             _confirmingDelete = false;
-        }
-        catch (ApiException ex)
-        {
-            _deleteError = ex;
         }
         catch (OperationCanceledException) when (ComponentToken.IsCancellationRequested)
         {

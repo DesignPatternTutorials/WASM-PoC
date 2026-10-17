@@ -8,7 +8,8 @@ namespace OfflineCrud.Application.Products;
 /// </summary>
 /// <remarks>
 /// Reads come from the products stored on this device, and the <c>Refresh…</c> members bring them up to date from
-/// the server (stale-while-revalidate). Writes still go to the server first in Phase 2. Phase 3 makes them local-first.
+/// the server (stale-while-revalidate). Writes are local-first: they never touch the network, work offline, and are
+/// sent to the server later by the sync engine.
 /// </remarks>
 public interface IProductService
 {
@@ -42,12 +43,12 @@ public interface IProductService
     /// <summary>Gets the category slugs, sorted. Falls back to the categories of stored products when offline.</summary>
     Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken cancellationToken);
 
-    /// <summary>Creates a product on the server, then stores it on this device.</summary>
+    /// <summary>Creates a product on this device and queues it to be sent to the server.</summary>
     Task<Product> CreateAsync(ProductDetails details, CancellationToken cancellationToken);
 
-    /// <summary>Updates a product on the server, then stores the result on this device.</summary>
+    /// <summary>Updates a product on this device and queues the change to be sent to the server.</summary>
     Task<Product> UpdateAsync(Guid id, ProductDetails details, CancellationToken cancellationToken);
 
-    /// <summary>Deletes a product on the server, then marks it deleted on this device.</summary>
+    /// <summary>Marks a product deleted on this device and queues the delete to be sent to the server.</summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken);
 }

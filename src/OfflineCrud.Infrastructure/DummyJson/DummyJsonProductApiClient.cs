@@ -60,26 +60,37 @@ internal sealed class DummyJsonProductApiClient : IProductApiClient
         return await GetAsync<List<string>>("products/category-list", cancellationToken);
     }
 
-    public async Task<ServerProduct> CreateAsync(ProductDetails details, CancellationToken cancellationToken)
+    public async Task<ServerProduct> CreateAsync(ProductDetails details, Guid idempotencyKey, CancellationToken cancellationToken)
     {
         using HttpRequestMessage request = new(HttpMethod.Post, "products/add") { Content = JsonContent.Create(ToWrite(details)) };
+        AddIdempotencyKey(request, idempotencyKey);
         DummyJsonProduct created = await SendAsync<DummyJsonProduct>(request, cancellationToken);
         return ToServerProduct(created);
     }
 
-    public async Task<ServerProduct> UpdateAsync(int serverId, ProductDetails details, CancellationToken cancellationToken)
+    public async Task<ServerProduct> UpdateAsync(int serverId, ProductDetails details, Guid idempotencyKey, CancellationToken cancellationToken)
     {
         string uri = string.Create(CultureInfo.InvariantCulture, $"products/{serverId}");
         using HttpRequestMessage request = new(HttpMethod.Put, uri) { Content = JsonContent.Create(ToWrite(details)) };
+        AddIdempotencyKey(request, idempotencyKey);
         DummyJsonProduct updated = await SendAsync<DummyJsonProduct>(request, cancellationToken);
         return ToServerProduct(updated);
     }
 
-    public async Task DeleteAsync(int serverId, CancellationToken cancellationToken)
+    public async Task DeleteAsync(int serverId, Guid idempotencyKey, CancellationToken cancellationToken)
     {
         string uri = string.Create(CultureInfo.InvariantCulture, $"products/{serverId}");
         using HttpRequestMessage request = new(HttpMethod.Delete, uri);
+        AddIdempotencyKey(request, idempotencyKey);
         using HttpResponseMessage response = await SendCoreAsync(request, cancellationToken);
+    }
+
+    // LEARN: A custom request header makes the browser send a CORS preflight (OPTIONS) first, and the server must list
+    // the header in Access-Control-Allow-Headers or the real request is blocked. DummyJSON echoes whatever headers are
+    // requested, so this works, although DummyJSON ignores the key itself (see docs/api-notes.md).
+    private static void AddIdempotencyKey(HttpRequestMessage request, Guid idempotencyKey)
+    {
+        request.Headers.Add("Idempotency-Key", idempotencyKey.ToString());
     }
 
     /// <summary>Maps an unsuccessful HTTP status to a failure kind.</summary>

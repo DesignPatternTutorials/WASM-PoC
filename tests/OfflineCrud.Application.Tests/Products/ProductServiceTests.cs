@@ -1,7 +1,9 @@
 using Moq;
 using OfflineCrud.Application.Common;
 using OfflineCrud.Application.Products;
+using OfflineCrud.Application.Sync;
 using OfflineCrud.Application.Tests.Domain;
+using OfflineCrud.Application.Tests.Fakes;
 using OfflineCrud.Domain.Products;
 
 namespace OfflineCrud.Application.Tests.Products;
@@ -13,7 +15,10 @@ public class ProductServiceTests
 
     private Mock<IProductApiClient> _apiClient = null!;
     private Mock<IProductRepository> _repository = null!;
+    private Mock<IOutboxStore> _outbox = null!;
+    private Mock<ISyncTrigger> _syncTrigger = null!;
     private ManualTimeProvider _time = null!;
+    private LocalStoreLock _lock = null!;
     private ProductService _service = null!;
     private List<Product> _saved = null!;
 
@@ -22,7 +27,10 @@ public class ProductServiceTests
     {
         _apiClient = new Mock<IProductApiClient>(MockBehavior.Strict);
         _repository = new Mock<IProductRepository>();
+        _outbox = new Mock<IOutboxStore>(MockBehavior.Strict);
+        _syncTrigger = new Mock<ISyncTrigger>();
         _time = new ManualTimeProvider(Now);
+        _lock = new LocalStoreLock();
         _saved = [];
 
         _repository.Setup(repo => repo.GetByServerIdsAsync(It.IsAny<IReadOnlyCollection<int>>(), It.IsAny<CancellationToken>()))
@@ -31,11 +39,11 @@ public class ProductServiceTests
             .Callback<IReadOnlyCollection<Product>, CancellationToken>((products, _) => _saved.AddRange(products))
             .Returns(Task.CompletedTask);
 
-        _service = new ProductService(_apiClient.Object, _repository.Object, _time);
+        _service = CreateService(_repository.Object, _outbox.Object);
     }
 
     [TearDown]
-    public void TearDown() => _service.Dispose();
+    public void TearDown() => _lock.Dispose();
 
     [Test]
     public async Task GetPageAsync_ReadsLocalStorageOnly()
@@ -121,7 +129,7 @@ public class ProductServiceTests
     {
         Product edited = ProductTests.FromServer(serverId: 1, version: "v1", details: ProductDetailsTests.Create(title: "Edited here"));
         Product deleted = ProductTests.FromServer(serverId: 2, version: "v1");
-        deleted.MarkDeleted();
+        deleted.ApplyLocalDelete();
         SetExisting(edited, deleted);
         _apiClient.Setup(api => api.SearchAsync("phone", 0, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PagedResult<ServerProduct>([Server(1, "v1"), Server(2, "v1"), Server(3, "v1")], 3, 0, 10));
@@ -165,7 +173,7 @@ public class ProductServiceTests
     public async Task GetAsync_HidesTombstones()
     {
         Product deleted = ProductTests.FromServer();
-        deleted.MarkDeleted();
+        deleted.ApplyLocalDelete();
         _repository.Setup(repo => repo.GetAsync(deleted.Id, It.IsAny<CancellationToken>())).ReturnsAsync(deleted);
 
         Assert.That(await _service.GetAsync(deleted.Id, CancellationToken.None), Is.Null);
@@ -245,85 +253,142 @@ public class ProductServiceTests
         Assert.That(categories, Is.EqualTo(new[] { "beauty", "tablets" }));
     }
 
+
     [Test]
-    public async Task CreateAsync_StoresTheProductUnderANewLocalId()
+    public async Task CreateAsync_SavesLocallyWithAnOutboxEntry_AndNeverCallsTheServer()
     {
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
         ProductDetails details = ProductDetailsTests.Create();
-        _apiClient.Setup(api => api.CreateAsync(details, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServerProduct(195, details, null, null, null));
 
-        Product created = await _service.CreateAsync(details, CancellationToken.None);
+        Product created = await service.CreateAsync(details, CancellationToken.None);
 
+        OutboxEntry entry = store.Entries.Single();
         Assert.Multiple(() =>
         {
-            Assert.That(created.Id, Is.Not.EqualTo(Guid.Empty));
-            Assert.That(created.ServerId, Is.EqualTo(195));
-            Assert.That(_saved, Is.EqualTo(new[] { created }));
+            Assert.That(created.ServerId, Is.Null);
+            Assert.That(store.Product(created.Id)!.SyncState, Is.EqualTo(SyncState.PendingCreate));
+            Assert.That(entry.Operation, Is.EqualTo(OutboxOperation.Create));
+            Assert.That(entry.EntityId, Is.EqualTo(created.Id));
+            Assert.That(entry.Payload, Is.EqualTo(details));
+            Assert.That(entry.CreatedAt, Is.EqualTo(Now));
+            Assert.That(store.CommitCount, Is.EqualTo(1), "product and entry in one transaction");
         });
+        _apiClient.VerifyNoOtherCalls();
+        _syncTrigger.Verify(trigger => trigger.RequestSync(), Times.Once);
     }
 
     [Test]
-    public async Task UpdateAsync_ResponseWithoutVersion_KeepsTheExistingVersion()
+    public async Task UpdateAsync_SyncedProduct_QueuesAnUpdate()
     {
-        // If the version were dropped, the next refresh would see "no version" and overwrite the edit.
-        Product product = ProductTests.FromServer(serverId: 4, version: "v1");
-        SetStored(product);
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
+        Product product = ProductTests.FromServer(serverId: 4);
+        store.Seed(product);
         ProductDetails edited = ProductDetailsTests.Create(title: "Edited");
-        _apiClient.Setup(api => api.UpdateAsync(4, edited, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServerProduct(4, edited, null, null, Version: null));
 
-        Product updated = await _service.UpdateAsync(product.Id, edited, CancellationToken.None);
+        Product updated = await service.UpdateAsync(product.Id, edited, CancellationToken.None);
 
         Assert.Multiple(() =>
         {
-            Assert.That(updated.Details.Title, Is.EqualTo("Edited"));
-            Assert.That(updated.ServerVersion, Is.EqualTo("v1"));
-            Assert.That(updated.ShouldAcceptServerCopy("v1"), Is.False, "a refresh with the old version must not undo the edit");
-            Assert.That(_saved, Is.EqualTo(new[] { updated }));
+            Assert.That(updated.Details, Is.EqualTo(edited));
+            Assert.That(store.Product(product.Id)!.SyncState, Is.EqualTo(SyncState.PendingUpdate));
+            Assert.That(store.Entries.Single().Operation, Is.EqualTo(OutboxOperation.Update));
+            Assert.That(store.Entries.Single().Payload, Is.EqualTo(edited));
+        });
+        _syncTrigger.Verify(trigger => trigger.RequestSync(), Times.Once);
+    }
+
+    [Test]
+    public async Task UpdateAsync_BeforeTheCreateIsSent_FoldsIntoTheCreate()
+    {
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
+        Product created = await service.CreateAsync(ProductDetailsTests.Create(title: "First"), CancellationToken.None);
+        ProductDetails edited = ProductDetailsTests.Create(title: "Second");
+
+        await service.UpdateAsync(created.Id, edited, CancellationToken.None);
+
+        OutboxEntry entry = store.Entries.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.Operation, Is.EqualTo(OutboxOperation.Create));
+            Assert.That(entry.Payload, Is.EqualTo(edited));
+            Assert.That(store.Product(created.Id)!.SyncState, Is.EqualTo(SyncState.PendingCreate));
         });
     }
 
     [Test]
-    public void UpdateAsync_ProductWithoutServerId_Throws()
+    public async Task DeleteAsync_BeforeTheCreateIsSent_DropsBoth()
     {
-        Product localOnly = Product.Restore(Guid.NewGuid(), ProductDetailsTests.Create(), null, null, null, null, SyncState.PendingCreate, false);
-        SetStored(localOnly);
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
+        Product created = await service.CreateAsync(ProductDetailsTests.Create(), CancellationToken.None);
+
+        await service.DeleteAsync(created.Id, CancellationToken.None);
+
+        Product tombstone = store.Product(created.Id)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(store.Entries, Is.Empty);
+            Assert.That(tombstone.IsDeleted, Is.True);
+            Assert.That(tombstone.SyncState, Is.EqualTo(SyncState.Synced), "nothing to tell the server");
+        });
+    }
+
+    [Test]
+    public async Task DeleteAsync_SyncedProduct_QueuesADeleteAndHidesIt()
+    {
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
+        Product product = ProductTests.FromServer(serverId: 4);
+        store.Seed(product);
+
+        await service.DeleteAsync(product.Id, CancellationToken.None);
+        Product? visible = await service.GetAsync(product.Id, CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(store.Entries.Single().Operation, Is.EqualTo(OutboxOperation.Delete));
+            Assert.That(store.Product(product.Id)!.SyncState, Is.EqualTo(SyncState.PendingDelete));
+            Assert.That(visible, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task RefreshCatalogueAsync_DoesNotOverwriteAProductWithAQueuedEdit()
+    {
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
+        Product product = ProductTests.FromServer(serverId: 4, version: "v1");
+        store.Seed(product);
+        await service.UpdateAsync(product.Id, ProductDetailsTests.Create(title: "Edited offline"), CancellationToken.None);
+        _apiClient.Setup(api => api.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ServerProduct(4, ProductDetailsTests.Create(title: "Changed on server"), null, null, "v2")]);
+
+        RefreshResult result = await service.RefreshCatalogueAsync(force: true, CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ChangedCount, Is.Zero);
+            Assert.That(store.Product(product.Id)!.Details.Title, Is.EqualTo("Edited offline"));
+        });
+    }
+
+    [Test]
+    public void UpdateAsync_UnknownProduct_Throws()
+    {
+        InMemoryLocalStore store = new();
+        ProductService service = CreateService(store, store);
 
         Assert.That(
-            () => _service.UpdateAsync(localOnly.Id, ProductDetailsTests.Create(), CancellationToken.None),
+            () => service.UpdateAsync(Guid.NewGuid(), ProductDetailsTests.Create(), CancellationToken.None),
             Throws.InvalidOperationException);
     }
 
-    [Test]
-    public async Task DeleteAsync_DeletesOnTheServerThenStoresATombstone()
+    private ProductService CreateService(IProductRepository repository, IOutboxStore outbox)
     {
-        Product product = ProductTests.FromServer(serverId: 4);
-        SetStored(product);
-        _apiClient.Setup(api => api.DeleteAsync(4, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-        await _service.DeleteAsync(product.Id, CancellationToken.None);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(_saved, Is.EqualTo(new[] { product }));
-            Assert.That(product.IsDeleted, Is.True);
-        });
-    }
-
-    [Test]
-    public void DeleteAsync_ServerFails_StoresNothing()
-    {
-        Product product = ProductTests.FromServer(serverId: 4);
-        SetStored(product);
-        _apiClient.Setup(api => api.DeleteAsync(4, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ApiException(ApiFailureKind.Network, "offline"));
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(() => _service.DeleteAsync(product.Id, CancellationToken.None), Throws.InstanceOf<ApiException>());
-            Assert.That(_saved, Is.Empty);
-            Assert.That(product.IsDeleted, Is.False);
-        });
+        return new ProductService(_apiClient.Object, repository, outbox, _lock, _syncTrigger.Object, _time);
     }
 
     private static ServerProduct Server(int serverId, string? version = "v1")

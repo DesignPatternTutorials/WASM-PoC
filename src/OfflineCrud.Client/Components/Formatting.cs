@@ -31,6 +31,19 @@ public static class Formatting
         };
     }
 
+    /// <summary>Describes how far in the future <paramref name="time"/> is, e.g. <c>in 8 seconds</c> or <c>in 3 minutes</c>.</summary>
+    public static string TimeUntil(DateTimeOffset time, DateTimeOffset now)
+    {
+        TimeSpan remaining = time - now;
+        return remaining.TotalSeconds switch
+        {
+            < 1 => "now",
+            < 60 => $"in {(int)Math.Ceiling(remaining.TotalSeconds)} seconds",
+            < 3600 => $"in {(int)Math.Ceiling(remaining.TotalMinutes)} minutes",
+            _ => $"at {time.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture)}",
+        };
+    }
+
     /// <summary>Turns a category slug such as <c>home-decoration</c> into <c>Home decoration</c>.</summary>
     public static string Category(string slug)
     {

@@ -7,7 +7,11 @@ namespace OfflineCrud.Application.Products;
 /// Port for the remote products API. Implemented in Infrastructure over <see cref="HttpClient"/>.
 /// </summary>
 /// <remarks>
-/// Every member throws <see cref="ApiException"/> on failure, never a raw HTTP exception.
+/// <para>Every member throws <see cref="ApiException"/> on failure, never a raw HTTP exception.</para>
+/// <para>
+/// Writes take an idempotency key, sent as the <c>Idempotency-Key</c> header. Sending the same request twice with the
+/// same key lets a server that supports it apply the change only once. DummyJSON ignores it.
+/// </para>
 /// </remarks>
 public interface IProductApiClient
 {
@@ -24,11 +28,11 @@ public interface IProductApiClient
     Task<IReadOnlyList<string>> GetCategoriesAsync(CancellationToken cancellationToken);
 
     /// <summary>Creates a product and returns it as the server stored it, including its new id.</summary>
-    Task<ServerProduct> CreateAsync(ProductDetails details, CancellationToken cancellationToken);
+    Task<ServerProduct> CreateAsync(ProductDetails details, Guid idempotencyKey, CancellationToken cancellationToken);
 
     /// <summary>Replaces a product's details and returns it as the server stored it.</summary>
-    Task<ServerProduct> UpdateAsync(int serverId, ProductDetails details, CancellationToken cancellationToken);
+    Task<ServerProduct> UpdateAsync(int serverId, ProductDetails details, Guid idempotencyKey, CancellationToken cancellationToken);
 
     /// <summary>Deletes a product.</summary>
-    Task DeleteAsync(int serverId, CancellationToken cancellationToken);
+    Task DeleteAsync(int serverId, Guid idempotencyKey, CancellationToken cancellationToken);
 }

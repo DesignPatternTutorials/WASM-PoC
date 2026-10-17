@@ -62,7 +62,7 @@ public class ServerCopyMergerTests
     public void Tombstone_IsNotResurrected()
     {
         Product local = ProductTests.FromServer(serverId: 5, version: "v1");
-        local.MarkDeleted();
+        local.ApplyLocalDelete();
 
         ServerCopyMergeResult result = ServerCopyMerger.Merge([local], [Server(5, "v2")], () => NewId);
 

@@ -82,6 +82,12 @@ public sealed class Product
     /// <summary>Whether at least one unit is in stock.</summary>
     public bool IsInStock => Details.Stock > 0;
 
+    /// <summary>Creates a product on this device. The server doesn't know about it until the outbox sends it.</summary>
+    public static Product CreateLocal(Guid id, ProductDetails details)
+    {
+        return new Product(id, details, rating: null, thumbnailUrl: null, serverId: null, serverVersion: null, SyncState.PendingCreate, isDeleted: false);
+    }
+
     /// <summary>Creates a local copy of a product the server returned.</summary>
     public static Product FromServer(
         Guid id,
@@ -145,9 +151,38 @@ public sealed class Product
         SyncState = SyncState.Synced;
     }
 
+    /// <summary>Applies an edit made on this device. <see cref="SyncState"/> is set separately, from the outbox.</summary>
+    /// <exception cref="InvalidOperationException">The product has been deleted.</exception>
+    public void ApplyLocalEdit(ProductDetails details)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        if (IsDeleted)
+        {
+            throw new InvalidOperationException("A deleted product can't be edited.");
+        }
+
+        Details = details;
+    }
+
     /// <summary>Marks the product as deleted on this device. It is kept as a tombstone and hidden from lists.</summary>
-    public void MarkDeleted()
+    public void ApplyLocalDelete()
     {
         IsDeleted = true;
+    }
+
+    /// <summary>Records the id the server assigned when it accepted this product's creation.</summary>
+    public void RecordServerId(int serverId)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(serverId);
+        ServerId = serverId;
+    }
+
+    /// <summary>
+    /// Sets where this product stands relative to the server. The outbox decides this: a product is
+    /// <see cref="SyncState.Synced"/> exactly when no outbox entries remain for it.
+    /// </summary>
+    public void SetSyncState(SyncState syncState)
+    {
+        SyncState = syncState;
     }
 }
