@@ -4,18 +4,63 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-A Blazor WebAssembly proof of concept with an ASP.NET Core API backend. The structure below is the intended design. No projects have been scaffolded yet, so update this file with real build/run commands once they exist.
+A teaching project: an offline-first Blazor WebAssembly CRUD app (standalone PWA, no server of its own) against the DummyJSON `products` API, using IndexedDB plus an outbox for local-first writes. The full brief is in `docs/offline-crud-spec.md`, and the work runs in phases (0–6).
+
+- **Done:** Phase 0 (scaffold).
+- **Next:** Phase 1 (online-only CRUD).
+
+Work one phase per feature branch. Stop at the end of each phase, summarise what was built, and wait for the user to review and merge.
+
+## Commands
+
+The SDK is pinned in `global.json` to 10.0.402 (.NET 10 LTS). Run all commands from the repo root.
+
+```sh
+dotnet build                                   # whole solution (OfflineCrud.slnx); warnings are errors
+dotnet test                                    # all tests
+dotnet test --filter "FullyQualifiedName~ArchitectureTests.Domain_DoesNotReferenceAnyOtherSolutionProject"   # one test
+dotnet run --project src/OfflineCrud.Client    # dev server on http://localhost:5121 (https profile: 7227)
+dotnet publish src/OfflineCrud.Client -c Release -o artifacts/publish   # static site in artifacts/publish/wwwroot
+```
+
+Offline behaviour (the caching service worker) only exists in a **published** build. `dotnet run` uses the no-op `service-worker.js`. A script to serve the publish output locally is planned for Phase 5.
 
 ## Architecture
-- Clean Architecture. Dependencies point inward only:
-  - `Domain`: entities, value objects, domain logic. No references to other projects or frameworks.
-  - `Application`: use cases, interfaces (ports), DTOs. References Domain only.
-  - `Infrastructure`: EF Core, external services, implementations of Application interfaces.
-  - `Client` (Blazor WASM): UI only. Talks to the API over HTTP, never references Infrastructure.
-  - `Api` (ASP.NET Core host): composition root, DI wiring, endpoints.
-- If a change would add a reference that breaks this direction, stop and ask.
+
+Clean Architecture. Dependencies point inward only:
+
+- `OfflineCrud.Domain`: entities, value objects, domain logic. No references to other projects or packages.
+- `OfflineCrud.Application`: use cases, ports (`IProductRepository`, `IOutboxStore`, `IProductApiClient`, `IConnectivityService`, `ISyncService`), DTOs. References Domain only.
+- `OfflineCrud.Infrastructure`: browser implementations of the Application ports: IndexedDB via a hand-rolled JS module, `HttpClient` for DummyJSON, connectivity via JS events. It's a Razor class library so `wwwroot/js/*.js` ships as static web assets at `_content/OfflineCrud.Infrastructure/js/...`. Don't replace the JS interop with a third-party IndexedDB package; keeping the interop visible is the point.
+- `OfflineCrud.Client`: Blazor WASM (PWA template). UI plus the DI **composition root**. It references Infrastructure *only* so `Program.cs` can register implementations. Pages and components depend on Application interfaces, never on Infrastructure types.
+- `tests/OfflineCrud.Application.Tests`: NUnit + Moq. `ArchitectureTests` enforce the layering on compiled assemblies.
+
+If a change would add a reference that breaks this direction, stop and ask.
+
+Key design rules from the spec:
+
+- IndexedDB is the UI's source of truth; the API is a sync target.
+- A local write and its outbox entry go in one IndexedDB transaction.
+- App-shell assets (CSS, JS, fonts, icons) must be local. No CDNs, or offline start-up breaks.
+
+## DummyJSON behaviour
+
+`docs/api-notes.md` records what was verified with curl, and it overrides the spec. The points most likely to matter:
+
+- `POST /products/add` always returns `id = total + 1` (195), so server ids aren't unique. The local GUID is the identity.
+- Writes aren't persisted. Follow-up writes to a created id return 404.
+- There's no server-side validation.
+
+## Teaching material
+
+This is a learning project, so explanations are part of the deliverable:
+
+- Mark every WASM-specific or offline-specific decision with a `// LEARN:` comment (`<!-- LEARN: -->` in XML/HTML), so `grep -rn "LEARN:"` finds every lesson.
+- Use XML doc comments on public types and members. `GenerateDocumentationFile` is on for Domain, Application and Infrastructure, so missing docs fail the build.
+- Add a section to `docs/LEARNING.md` for each phase: what was built, concepts, gotchas, things to try. Keep it accurate to the code.
 
 ## Git workflow
+
 - Branches: `main` (releases only) and `dev` (integration). Never commit directly to either.
 - Every piece of work goes on a branch from `dev`: `feature/<short-name>`, `fix/<short-name>`.
 - Before starting work, check the current branch. If it's `main` or `dev`, create a feature branch first.
@@ -23,8 +68,10 @@ A Blazor WebAssembly proof of concept with an ASP.NET Core API backend. The stru
 - Small, focused commits. Don't merge; the user reviews and merges to `dev` themselves.
 
 ## C# conventions
-- Follow Microsoft's .NET coding conventions and the repo's `.editorconfig`.
-- Nullable reference types enabled; no warnings left unresolved.
-- File-scoped namespaces, `async` all the way with `Async` suffix, pass `CancellationToken` through.
-- Dependency injection via constructors; no service locator.
-- Tests: NUnit + Moq. Write or update tests with each feature. Run `dotnet build` and `dotnet test` before committing.
+
+- Follow Microsoft's .NET coding conventions and the repo's `.editorconfig` (enforced in build via `EnforceCodeStyleInBuild`).
+- Shared build settings (TFM, nullable, warnings as errors) live in `Directory.Build.props`. Don't repeat them in project files.
+- Nullable reference types are enabled. Leave no warnings unresolved (`TreatWarningsAsErrors` is on).
+- Use file-scoped namespaces. Go `async` all the way with the `Async` suffix, and pass `CancellationToken` through.
+- Use constructor dependency injection; no service locator.
+- Tests use NUnit + Moq. Write or update tests with each feature. Run `dotnet build` and `dotnet test` before committing.
