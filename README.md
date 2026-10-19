@@ -30,6 +30,20 @@ written up in [`docs/LEARNING.md`](docs/LEARNING.md).
 - **Clean Architecture in a browser app:** Domain and Application are plain .NET; browser specifics live in
   Infrastructure; `Program.cs` in the client is the composition root.
 
+## How it works
+
+![Use case diagram: what the user does, what the app does behind the scenes, and the outside systems it talks to](docs/images/use-cases.svg)
+
+- **Reading:** lists and detail pages read from IndexedDB, so they work with no network. **Refresh** pulls from
+  DummyJSON and merges a server copy only into records with no pending local change.
+- **Writing:** create, edit and delete never call the API. Each saves the product and an outbox entry in one IndexedDB
+  transaction, then asks the scheduler to sync. Deletes are tombstones.
+- **Syncing:** `SyncScheduler` sends the outbox in order per product. Network failures, 5xx and 429 retry with backoff;
+  other failures wait on the **Sync** page for Retry or Discard. Sync pauses while offline and resumes when the network
+  returns.
+- **Starting offline:** in a published build the service worker caches the whole app shell, so the app opens with the
+  server stopped. A new version waits until the user applies it from the update banner.
+
 ## Quick start
 
 Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download) (pinned in `global.json`) and an internet connection for
