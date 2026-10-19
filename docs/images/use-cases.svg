@@ -1,0 +1,142 @@
+<svg viewBox="0 0 1020 770" width="1020" height="770" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Offline CRUD use cases</title>
+  <desc id="desc">UML use case diagram. The user browses, views, creates, edits and deletes products, refreshes from the server, reviews the sync queue, syncs, simulates offline and starts the app offline. Behind the scenes the app reads the local store, saves locally and queues changes, merges server copies, syncs pending changes to DummyJSON and notifies the user of background results.</desc>
+  <style>
+    svg {
+      --bg: #ffffff; --fg: #1c2330; --muted: #5b6577; --line: #8a93a3; --boundary: #c9cfd9;
+      --goal-fill: #e3eefc; --goal-stroke: #2f6fca; --sys-fill: #eef0f3; --sys-stroke: #7b8596;
+      --ext-fill: #fbf0de; --ext-stroke: #b07a1f;
+    }
+    @media (prefers-color-scheme: dark) {
+      svg {
+        --bg: #0d1117; --fg: #e4e8ef; --muted: #9aa4b5; --line: #7d8799; --boundary: #3a4352;
+        --goal-fill: #1b2c45; --goal-stroke: #6ea2ec; --sys-fill: #232a35; --sys-stroke: #8d98ab;
+        --ext-fill: #3a2d17; --ext-stroke: #d9a54a;
+      }
+    }
+    .bg { fill: var(--bg); }
+    .t { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; fill: var(--fg); font-size: 13.5px; }
+    .t.sm { font-size: 11.5px; fill: var(--muted); }
+    .st { font-family: Consolas, "SFMono-Regular", Menlo, monospace; font-size: 11px; fill: var(--muted); }
+    .goal { fill: var(--goal-fill); stroke: var(--goal-stroke); stroke-width: 1.5; }
+    .sys { fill: var(--sys-fill); stroke: var(--sys-stroke); stroke-width: 1.5; }
+    .ext { fill: var(--ext-fill); stroke: var(--ext-stroke); stroke-width: 1.5; }
+    .assoc { stroke: var(--line); stroke-width: 1.3; fill: none; }
+    .dep { stroke: var(--line); stroke-width: 1.3; stroke-dasharray: 5 4; fill: none; }
+    .bound { fill: none; stroke: var(--boundary); stroke-width: 1.5; }
+    .actor { stroke: var(--fg); stroke-width: 2; fill: none; }
+    .head { fill: none; stroke: var(--line); stroke-width: 1.4; }
+  </style>
+  <defs>
+    <marker id="open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1020" height="770" rx="8"/>
+
+  <!-- System boundary -->
+  <rect class="bound" x="190" y="30" width="620" height="720" rx="6"/>
+  <text class="st" x="206" y="52">«system» Offline CRUD — Blazor WASM PWA in the browser</text>
+
+  <!-- Primary actor: User -->
+  <g transform="translate(80,385)">
+    <circle class="actor" cx="0" cy="-34" r="13"/>
+    <line class="actor" x1="0" y1="-21" x2="0" y2="16"/>
+    <line class="actor" x1="-22" y1="-6" x2="22" y2="-6"/>
+    <line class="actor" x1="0" y1="16" x2="-17" y2="44"/>
+    <line class="actor" x1="0" y1="16" x2="17" y2="44"/>
+    <text class="t" x="0" y="66" text-anchor="middle" font-weight="600">User</text>
+  </g>
+
+  <!-- User associations -->
+  <line class="assoc" x1="104" y1="378" x2="216" y2="105"/>
+  <line class="assoc" x1="104" y1="378" x2="216" y2="170"/>
+  <line class="assoc" x1="104" y1="380" x2="216" y2="235"/>
+  <line class="assoc" x1="104" y1="380" x2="216" y2="300"/>
+  <line class="assoc" x1="104" y1="380" x2="216" y2="365"/>
+  <line class="assoc" x1="104" y1="382" x2="216" y2="430"/>
+  <line class="assoc" x1="104" y1="384" x2="216" y2="495"/>
+  <line class="assoc" x1="104" y1="386" x2="216" y2="560"/>
+  <line class="assoc" x1="104" y1="388" x2="216" y2="625"/>
+  <line class="assoc" x1="104" y1="390" x2="216" y2="695"/>
+
+  <!-- User goals -->
+  <ellipse class="goal" cx="330" cy="105" rx="114" ry="25"/><text class="t" x="330" y="110" text-anchor="middle">Browse &amp; search products</text>
+  <ellipse class="goal" cx="330" cy="170" rx="114" ry="25"/><text class="t" x="330" y="175" text-anchor="middle">View product details</text>
+  <ellipse class="goal" cx="330" cy="235" rx="114" ry="25"/><text class="t" x="330" y="240" text-anchor="middle">Create a product</text>
+  <ellipse class="goal" cx="330" cy="300" rx="114" ry="25"/><text class="t" x="330" y="305" text-anchor="middle">Edit a product</text>
+  <ellipse class="goal" cx="330" cy="365" rx="114" ry="25"/><text class="t" x="330" y="370" text-anchor="middle">Delete a product</text>
+  <ellipse class="goal" cx="330" cy="430" rx="114" ry="25"/><text class="t" x="330" y="435" text-anchor="middle">Refresh from server</text>
+  <ellipse class="goal" cx="330" cy="495" rx="114" ry="25"/><text class="t" x="330" y="500" text-anchor="middle">Review sync queue</text>
+  <ellipse class="goal" cx="330" cy="560" rx="114" ry="25"/><text class="t" x="330" y="565" text-anchor="middle">Sync now</text>
+  <ellipse class="goal" cx="330" cy="625" rx="114" ry="25"/><text class="t" x="330" y="630" text-anchor="middle">Simulate offline</text>
+  <ellipse class="goal" cx="330" cy="695" rx="114" ry="30"/>
+  <text class="t" x="330" y="691" text-anchor="middle">Start app offline /</text>
+  <text class="t" x="330" y="708" text-anchor="middle">apply app update</text>
+
+  <!-- Internal behaviour -->
+  <ellipse class="sys" cx="680" cy="137" rx="112" ry="30"/>
+  <text class="t" x="680" y="133" text-anchor="middle">Read local store</text>
+  <text class="t sm" x="680" y="150" text-anchor="middle">IndexedDB</text>
+
+  <ellipse class="sys" cx="680" cy="300" rx="112" ry="32"/>
+  <text class="t" x="680" y="296" text-anchor="middle">Save locally + queue</text>
+  <text class="t sm" x="680" y="313" text-anchor="middle">one transaction: products + outbox</text>
+
+  <ellipse class="sys" cx="680" cy="430" rx="112" ry="30"/>
+  <text class="t" x="680" y="426" text-anchor="middle">Merge server copies</text>
+  <text class="t sm" x="680" y="443" text-anchor="middle">only into Synced records</text>
+
+  <ellipse class="sys" cx="680" cy="510" rx="112" ry="27"/>
+  <text class="t" x="680" y="515" text-anchor="middle">Retry · discard · clear</text>
+
+  <ellipse class="sys" cx="680" cy="600" rx="112" ry="30"/>
+  <text class="t" x="680" y="596" text-anchor="middle">Sync pending changes</text>
+  <text class="t sm" x="680" y="613" text-anchor="middle">FIFO per product, with backoff</text>
+
+  <ellipse class="sys" cx="680" cy="698" rx="112" ry="27"/>
+  <text class="t" x="680" y="703" text-anchor="middle">Notify background results</text>
+
+  <!-- include / extend -->
+  <path class="dep" d="M444,105 L568,128" marker-end="url(#open)"/>
+  <path class="dep" d="M444,170 L568,148" marker-end="url(#open)"/>
+  <text class="st" x="506" y="132" text-anchor="middle">«include»</text>
+
+  <path class="dep" d="M444,235 L568,290" marker-end="url(#open)"/>
+  <path class="dep" d="M444,300 L568,300" marker-end="url(#open)"/>
+  <path class="dep" d="M444,365 L568,310" marker-end="url(#open)"/>
+  <text class="st" x="506" y="292" text-anchor="middle">«include»</text>
+
+  <path class="dep" d="M444,430 L568,430" marker-end="url(#open)"/>
+  <text class="st" x="506" y="422" text-anchor="middle">«include»</text>
+
+  <path class="dep" d="M568,508 L444,497" marker-end="url(#open)"/>
+  <text class="st" x="506" y="492" text-anchor="middle">«extend»</text>
+
+  <path class="dep" d="M444,563 L568,595" marker-end="url(#open)"/>
+  <text class="st" x="500" y="566" text-anchor="middle">«include»</text>
+
+  <path class="dep" d="M680,671 L680,630" marker-end="url(#open)"/>
+  <text class="st" x="688" y="655">«extend»</text>
+
+  <!-- Secondary actors -->
+  <rect class="ext" x="862" y="395" width="138" height="66" rx="4"/>
+  <text class="st" x="931" y="417" text-anchor="middle">«external API»</text>
+  <text class="t" x="931" y="437" text-anchor="middle" font-weight="600">DummyJSON</text>
+  <text class="t sm" x="931" y="453" text-anchor="middle">/products</text>
+
+  <rect class="ext" x="862" y="580" width="138" height="66" rx="4"/>
+  <text class="st" x="931" y="602" text-anchor="middle">«browser»</text>
+  <text class="t" x="931" y="622" text-anchor="middle" font-weight="600">Network status</text>
+  <text class="t sm" x="931" y="638" text-anchor="middle">online / offline events</text>
+
+  <rect class="ext" x="862" y="680" width="138" height="56" rx="4"/>
+  <text class="st" x="931" y="702" text-anchor="middle">«browser»</text>
+  <text class="t" x="931" y="722" text-anchor="middle" font-weight="600">Service worker</text>
+
+  <line class="assoc" x1="792" y1="430" x2="862" y2="428"/>
+  <line class="assoc" x1="786" y1="590" x2="862" y2="440"/>
+  <line class="assoc" x1="792" y1="604" x2="862" y2="612"/>
+  <path class="assoc" d="M444,705 C 520,750 800,752 862,716"/>
+</svg>
